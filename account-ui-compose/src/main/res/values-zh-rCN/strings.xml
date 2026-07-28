@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="rising_stones_account_title">石之家账号</string>
+    <string name="rising_stones_account_back">返回</string>
+    <string name="rising_stones_account_manage_session">管理登录</string>
+    <string name="rising_stones_account_retry">重试</string>
+    <string name="rising_stones_account_character">角色</string>
+    <string name="rising_stones_account_house">房屋</string>
+    <string name="rising_stones_account_sign_count">本月已签到 %1$d 次</string>
+    <string name="rising_stones_account_sign_in">每日签到</string>
+    <string name="rising_stones_account_rewards">每月奖励</string>
+    <string name="rising_stones_account_required_days">签到 %1$d 次后可领取</string>
+    <string name="rising_stones_account_claim">领取</string>
+    <string name="rising_stones_account_received">已领取</string>
+    <string name="rising_stones_account_not_qualified">暂不可领取</string>
+    <string name="rising_stones_account_no_rewards">暂无奖励信息</string>
+</resources>

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="rising_stones_app_title">石之家</string>
+    <string name="rising_stones_login_title">官方网页登录</string>
+    <string name="rising_stones_login_description">认证完全在 WebView 的石之家官方页面内完成。应用不读取登录表单，只捕获认证后生成的石之家 Cookie。</string>
+    <string name="rising_stones_credential_handling">应用只保存 ff14risingstones Cookie 和当前 WebView 的 User-Agent。凭证在本机加密保存且不参与备份或换机迁移；断开连接会删除本地凭证，并仅清除官方域名下这枚 Cookie。</string>
+    <string name="rising_stones_login_action">打开官方登录页</string>
+    <string name="rising_stones_signed_in">已连接石之家会话</string>
+    <string name="rising_stones_signed_in_as">已连接：%1$s</string>
+    <string name="rising_stones_relogin">重新登录</string>
+    <string name="rising_stones_sign_out">断开连接</string>
+    <string name="rising_stones_cancel">关闭</string>
+    <string name="rising_stones_back">返回</string>
+    <string name="rising_stones_blocked_navigation">已阻止跳转到非官方页面。</string>
+    <string name="rising_stones_current_host">当前官方页面：https://%1$s</string>
+    <string name="rising_stones_retry_validation">重新验证会话</string>
+    <string name="rising_stones_capabilities_title">当前会话能力</string>
+    <string name="rising_stones_capabilities_description">此处不显示 Cookie 或 User-Agent，只表示本次会话已验证成功的接口能力，不代表官方服务的永久保证。</string>
+    <string name="rising_stones_capability_verified">已验证</string>
+    <string name="rising_stones_capability_not_verified">未验证</string>
+    <string name="rising_stones_capability_account_read">账号摘要</string>
+    <string name="rising_stones_capability_daily_sign_in">每日签到</string>
+    <string name="rising_stones_capability_forum_write">论坛写入</string>
+    <string name="rising_stones_capability_forum_image_upload">论坛图片上传</string>
+    <string name="rising_stones_capability_recruitment_authenticated">登录态招募</string>
+    <string name="rising_stones_capability_recruitment_write">招募互动</string>
+    <string name="rising_stones_capability_glamour_authenticated">投影台</string>
+    <string name="rising_stones_capability_personal_data">个人数据中心</string>
+    <string name="rising_stones_copy_capability_report">复制脱敏报告</string>
+    <string name="rising_stones_capability_report_copied">已复制脱敏报告</string>
+</resources>

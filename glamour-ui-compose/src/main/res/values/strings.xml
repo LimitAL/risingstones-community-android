@@ -1,0 +1,34 @@
+<resources>
+    <string name="glamour_title">Glamours</string>
+    <string name="glamour_back">Back</string>
+    <string name="glamour_back_to_list">Back to list</string>
+    <string name="glamour_refresh">Refresh</string>
+    <string name="glamour_refresh_detail">Refresh details</string>
+    <string name="glamour_retry">Retry</string>
+    <string name="glamour_dismiss">Dismiss</string>
+    <string name="glamour_more">Load more</string>
+    <string name="glamour_empty">No glamours were found.</string>
+    <string name="glamour_select">Select a glamour.</string>
+    <string name="glamour_unavailable">The glamour service is unavailable.</string>
+    <string name="glamour_identity_required">Sign in to Rising Stones before opening glamours.</string>
+    <string name="glamour_community">Community</string>
+    <string name="glamour_favorites">Favorites</string>
+    <string name="glamour_order_default">Recommended</string>
+    <string name="glamour_order_hottest">Hottest</string>
+    <string name="glamour_order_latest">Latest</string>
+    <string name="glamour_search_hint">Search title</string>
+    <string name="glamour_search">Search</string>
+    <string name="glamour_clear">Clear</string>
+    <string name="glamour_folder_format">%1$s (%2$d)</string>
+    <string name="glamour_counts">%1$d likes · %2$d favorites</string>
+    <string name="glamour_races_format">Races: %1$s</string>
+    <string name="glamour_like">Like (%1$d)</string>
+    <string name="glamour_unlike">Unlike (%1$d)</string>
+    <string name="glamour_favorite">Favorite (%1$d)</string>
+    <string name="glamour_unfavorite">Remove favorite (%1$d)</string>
+    <string name="glamour_equipment">Equipment</string>
+    <string name="glamour_equipment_unknown">Unknown equipment</string>
+    <string name="glamour_face_accessory">Facewear</string>
+    <string name="glamour_fashion_accessory">Fashion accessory</string>
+    <string name="glamour_no_image">No image</string>
+</resources>

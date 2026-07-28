@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="forum_title">Official Forum</string>
+    <string name="forum_account">Account</string>
+    <string name="forum_services">Services</string>
+    <string name="forum_recruitment">Recruitment</string>
+    <string name="forum_glamour">Glamours</string>
+    <string name="forum_personal_data">Personal data</string>
+    <string name="forum_posts">Topics</string>
+    <string name="forum_guides">Guides</string>
+    <string name="forum_search_hint">Search the official forum</string>
+    <string name="forum_search">Search</string>
+    <string name="forum_refresh">Refresh</string>
+    <string name="forum_retry">Retry</string>
+    <string name="forum_empty">No matching topics</string>
+    <string name="forum_load_more">Load more</string>
+    <string name="forum_loading">Loading…</string>
+    <string name="forum_load_failed">The official forum could not be loaded.</string>
+    <string name="forum_load_more_failed">More content could not be loaded.</string>
+    <string name="forum_select_post">Select a topic to read it</string>
+    <string name="forum_back">Back</string>
+    <string name="forum_comments">Comments</string>
+    <string name="forum_comment_count">%1$d comments</string>
+    <string name="forum_like_count">%1$d likes</string>
+    <string name="forum_star_count">%1$d stars</string>
+    <string name="forum_read_count">%1$d reads</string>
+    <string name="forum_hottest">Hottest</string>
+    <string name="forum_latest">Latest</string>
+    <string name="forum_earliest">Earliest</string>
+    <string name="forum_only_author">Post author only</string>
+    <string name="forum_view_replies">View %1$d replies</string>
+    <string name="forum_replies">Replies</string>
+    <string name="forum_close">Close</string>
+    <string name="forum_pinned">Pinned</string>
+    <string name="forum_refined">Featured</string>
+    <string name="forum_open_image">Open image</string>
+    <string name="forum_open_link">Open link</string>
+    <string name="forum_open_video">Open video</string>
+    <string name="forum_image_failed">Image unavailable</string>
+    <string name="forum_expand">Expand</string>
+    <string name="forum_collapse">Collapse</string>
+    <string name="forum_no_content">This topic has no readable content.</string>
+    <string name="forum_anonymous_notice">Forum reading works without signing in. Account actions remain disabled until Cookie-only compatibility is verified.</string>
+</resources>

@@ -1,0 +1,34 @@
+<resources>
+    <string name="glamour_title">投影台</string>
+    <string name="glamour_back">返回</string>
+    <string name="glamour_back_to_list">返回列表</string>
+    <string name="glamour_refresh">刷新</string>
+    <string name="glamour_refresh_detail">刷新详情</string>
+    <string name="glamour_retry">重试</string>
+    <string name="glamour_dismiss">关闭</string>
+    <string name="glamour_more">加载更多</string>
+    <string name="glamour_empty">暂无投影作品。</string>
+    <string name="glamour_select">请选择一件投影作品。</string>
+    <string name="glamour_unavailable">暂时无法访问投影台。</string>
+    <string name="glamour_identity_required">请先登录石之家，再打开投影台。</string>
+    <string name="glamour_community">社区作品</string>
+    <string name="glamour_favorites">我的收藏</string>
+    <string name="glamour_order_default">推荐</string>
+    <string name="glamour_order_hottest">最热</string>
+    <string name="glamour_order_latest">最新</string>
+    <string name="glamour_search_hint">搜索标题</string>
+    <string name="glamour_search">搜索</string>
+    <string name="glamour_clear">清除</string>
+    <string name="glamour_folder_format">%1$s（%2$d）</string>
+    <string name="glamour_counts">%1$d 个赞 · %2$d 次收藏</string>
+    <string name="glamour_races_format">种族：%1$s</string>
+    <string name="glamour_like">点赞（%1$d）</string>
+    <string name="glamour_unlike">取消点赞（%1$d）</string>
+    <string name="glamour_favorite">收藏（%1$d）</string>
+    <string name="glamour_unfavorite">取消收藏（%1$d）</string>
+    <string name="glamour_equipment">装备</string>
+    <string name="glamour_equipment_unknown">未知装备</string>
+    <string name="glamour_face_accessory">脸饰</string>
+    <string name="glamour_fashion_accessory">时尚配饰</string>
+    <string name="glamour_no_image">暂无图片</string>
+</resources>

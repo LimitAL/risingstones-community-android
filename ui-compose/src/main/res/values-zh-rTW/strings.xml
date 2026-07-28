@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="rising_stones_app_title">石之家</string>
+    <string name="rising_stones_login_title">官方網頁登入</string>
+    <string name="rising_stones_login_description">認證完全在 WebView 的石之家官方頁面內完成。應用程式不讀取登入表單，只擷取認證後產生的石之家 Cookie。</string>
+    <string name="rising_stones_credential_handling">應用程式只儲存 ff14risingstones Cookie 與目前 WebView 的 User-Agent。憑證在本機加密儲存且不參與備份或換機移轉；中斷連接會刪除本機憑證，並僅清除官方網域下的這枚 Cookie。</string>
+    <string name="rising_stones_login_action">開啟官方登入頁</string>
+    <string name="rising_stones_signed_in">已連接石之家工作階段</string>
+    <string name="rising_stones_signed_in_as">已連接：%1$s</string>
+    <string name="rising_stones_relogin">重新登入</string>
+    <string name="rising_stones_sign_out">中斷連接</string>
+    <string name="rising_stones_cancel">關閉</string>
+    <string name="rising_stones_back">返回</string>
+    <string name="rising_stones_blocked_navigation">已阻止跳轉至非官方頁面。</string>
+    <string name="rising_stones_current_host">目前官方頁面：https://%1$s</string>
+    <string name="rising_stones_retry_validation">重新驗證工作階段</string>
+    <string name="rising_stones_capabilities_title">目前工作階段能力</string>
+    <string name="rising_stones_capabilities_description">此處不顯示 Cookie 或 User-Agent，只表示本次工作階段已驗證成功的介面能力，不代表官方服務的永久保證。</string>
+    <string name="rising_stones_capability_verified">已驗證</string>
+    <string name="rising_stones_capability_not_verified">未驗證</string>
+    <string name="rising_stones_capability_account_read">帳號摘要</string>
+    <string name="rising_stones_capability_daily_sign_in">每日簽到</string>
+    <string name="rising_stones_capability_forum_write">論壇寫入</string>
+    <string name="rising_stones_capability_forum_image_upload">論壇圖片上傳</string>
+    <string name="rising_stones_capability_recruitment_authenticated">登入狀態招募</string>
+    <string name="rising_stones_capability_recruitment_write">招募互動</string>
+    <string name="rising_stones_capability_glamour_authenticated">投影台</string>
+    <string name="rising_stones_capability_personal_data">個人資料中心</string>
+    <string name="rising_stones_copy_capability_report">複製去識別報告</string>
+    <string name="rising_stones_capability_report_copied">已複製去識別報告</string>
+</resources>

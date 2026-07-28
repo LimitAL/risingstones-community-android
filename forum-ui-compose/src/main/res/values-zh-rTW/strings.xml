@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="forum_title">官方論壇</string>
+    <string name="forum_account">帳號</string>
+    <string name="forum_services">服務</string>
+    <string name="forum_recruitment">招募</string>
+    <string name="forum_glamour">投影台</string>
+    <string name="forum_personal_data">個人資料</string>
+    <string name="forum_posts">主題</string>
+    <string name="forum_guides">攻略</string>
+    <string name="forum_search_hint">搜尋官方論壇</string>
+    <string name="forum_search">搜尋</string>
+    <string name="forum_refresh">重新整理</string>
+    <string name="forum_retry">重試</string>
+    <string name="forum_empty">沒有符合條件的主題</string>
+    <string name="forum_load_more">載入更多</string>
+    <string name="forum_loading">載入中…</string>
+    <string name="forum_load_failed">暫時無法讀取官方論壇。</string>
+    <string name="forum_load_more_failed">無法載入更多內容。</string>
+    <string name="forum_select_post">選擇一個主題檢視詳情</string>
+    <string name="forum_back">返回</string>
+    <string name="forum_comments">留言</string>
+    <string name="forum_comment_count">%1$d 則留言</string>
+    <string name="forum_like_count">%1$d 讚</string>
+    <string name="forum_star_count">%1$d 收藏</string>
+    <string name="forum_read_count">%1$d 閱讀</string>
+    <string name="forum_hottest">最熱門</string>
+    <string name="forum_latest">最新</string>
+    <string name="forum_earliest">最早</string>
+    <string name="forum_only_author">只看樓主</string>
+    <string name="forum_view_replies">檢視 %1$d 則回覆</string>
+    <string name="forum_replies">樓中樓回覆</string>
+    <string name="forum_close">關閉</string>
+    <string name="forum_pinned">置頂</string>
+    <string name="forum_refined">精華</string>
+    <string name="forum_open_image">開啟圖片</string>
+    <string name="forum_open_link">開啟連結</string>
+    <string name="forum_open_video">開啟影片</string>
+    <string name="forum_image_failed">圖片暫不可用</string>
+    <string name="forum_expand">展開</string>
+    <string name="forum_collapse">收合</string>
+    <string name="forum_no_content">此主題暫無可閱讀正文。</string>
+    <string name="forum_anonymous_notice">無需登入即可閱讀論壇。Cookie 單獨驗證完成目前線上驗證前，帳號寫入操作維持關閉。</string>
+</resources>

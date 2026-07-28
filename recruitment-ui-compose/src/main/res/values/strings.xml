@@ -1,0 +1,24 @@
+<resources>
+    <string name="recruitment_title">Recruitment</string>
+    <string name="recruitment_back">Back</string>
+    <string name="recruitment_refresh">Refresh</string>
+    <string name="recruitment_retry">Retry</string>
+    <string name="recruitment_loading">Loading…</string>
+    <string name="recruitment_more">Load more</string>
+    <string name="recruitment_empty">No recruitment posts were found.</string>
+    <string name="recruitment_select">Select a recruitment post.</string>
+    <string name="recruitment_board_duty">Duty</string>
+    <string name="recruitment_board_beginner">Beginner</string>
+    <string name="recruitment_board_guild">My guild</string>
+    <string name="recruitment_board_other">Other</string>
+    <string name="recruitment_board_roleplay">Role-play</string>
+    <string name="recruitment_team">Team</string>
+    <string name="recruitment_requirements">Requirements</string>
+    <string name="recruitment_strategy">Strategy</string>
+    <string name="recruitment_description">Description</string>
+    <string name="recruitment_summary">Summary</string>
+    <string name="recruitment_refresh_detail">Refresh details</string>
+    <string name="recruitment_roleplay_extras">Members and reviews</string>
+    <string name="recruitment_rating">Rating %1$.1f · %2$d votes</string>
+    <string name="recruitment_likes">%1$d likes</string>
+</resources>

@@ -1,0 +1,34 @@
+<resources>
+    <string name="glamour_title">投影台</string>
+    <string name="glamour_back">返回</string>
+    <string name="glamour_back_to_list">返回列表</string>
+    <string name="glamour_refresh">重新整理</string>
+    <string name="glamour_refresh_detail">重新整理詳情</string>
+    <string name="glamour_retry">重試</string>
+    <string name="glamour_dismiss">關閉</string>
+    <string name="glamour_more">載入更多</string>
+    <string name="glamour_empty">暫無投影作品。</string>
+    <string name="glamour_select">請選擇一件投影作品。</string>
+    <string name="glamour_unavailable">暫時無法存取投影台。</string>
+    <string name="glamour_identity_required">請先登入石之家，再開啟投影台。</string>
+    <string name="glamour_community">社群作品</string>
+    <string name="glamour_favorites">我的收藏</string>
+    <string name="glamour_order_default">推薦</string>
+    <string name="glamour_order_hottest">最熱門</string>
+    <string name="glamour_order_latest">最新</string>
+    <string name="glamour_search_hint">搜尋標題</string>
+    <string name="glamour_search">搜尋</string>
+    <string name="glamour_clear">清除</string>
+    <string name="glamour_folder_format">%1$s（%2$d）</string>
+    <string name="glamour_counts">%1$d 個讚 · %2$d 次收藏</string>
+    <string name="glamour_races_format">種族：%1$s</string>
+    <string name="glamour_like">按讚（%1$d）</string>
+    <string name="glamour_unlike">取消按讚（%1$d）</string>
+    <string name="glamour_favorite">收藏（%1$d）</string>
+    <string name="glamour_unfavorite">取消收藏（%1$d）</string>
+    <string name="glamour_equipment">裝備</string>
+    <string name="glamour_equipment_unknown">未知裝備</string>
+    <string name="glamour_face_accessory">臉部配件</string>
+    <string name="glamour_fashion_accessory">時尚配件</string>
+    <string name="glamour_no_image">暫無圖片</string>
+</resources>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="rising_stones_account_title">Rising Stones account</string>
+    <string name="rising_stones_account_back">Back</string>
+    <string name="rising_stones_account_manage_session">Manage sign-in</string>
+    <string name="rising_stones_account_retry">Retry</string>
+    <string name="rising_stones_account_character">Character</string>
+    <string name="rising_stones_account_house">Estate</string>
+    <string name="rising_stones_account_sign_count">Signed in %1$d times this month</string>
+    <string name="rising_stones_account_sign_in">Daily sign-in</string>
+    <string name="rising_stones_account_rewards">Monthly rewards</string>
+    <string name="rising_stones_account_required_days">Available after %1$d sign-ins</string>
+    <string name="rising_stones_account_claim">Claim</string>
+    <string name="rising_stones_account_received">Received</string>
+    <string name="rising_stones_account_not_qualified">Not yet available</string>
+    <string name="rising_stones_account_no_rewards">No reward information</string>
+</resources>

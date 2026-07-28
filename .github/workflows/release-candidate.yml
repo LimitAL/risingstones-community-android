@@ -1,0 +1,186 @@
+name: Build release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: "Non-SNAPSHOT version, for example 0.1.0"
+        required: true
+        type: string
+      version_code:
+        description: "Positive Android versionCode"
+        required: true
+        type: number
+
+permissions:
+  contents: read
+
+concurrency:
+  group: risingstones-android-release-candidate-${{ github.ref }}-${{ inputs.version_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Signed app and Maven candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    env:
+      RISINGSTONES_RELEASE_STORE_TYPE: PKCS12
+      RISINGSTONES_RELEASE_STORE_PASSWORD: ${{ secrets.RISINGSTONES_RELEASE_STORE_PASSWORD }}
+      RISINGSTONES_RELEASE_KEY_ALIAS: ${{ secrets.RISINGSTONES_RELEASE_KEY_ALIAS }}
+      RISINGSTONES_RELEASE_KEY_PASSWORD: ${{ secrets.RISINGSTONES_RELEASE_KEY_PASSWORD }}
+      CANDIDATE_VERSION: ${{ inputs.version_name }}
+      CANDIDATE_VERSION_CODE: ${{ inputs.version_code }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up JDK
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6
+
+      - name: Validate candidate inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$CANDIDATE_VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::version_name must look like 0.1.0 or 0.1.0-beta.1"
+            exit 1
+          fi
+          if [[ "$CANDIDATE_VERSION" == *-SNAPSHOT ]]; then
+            echo "::error::A release candidate cannot use a SNAPSHOT version"
+            exit 1
+          fi
+          if [[ ! "$CANDIDATE_VERSION_CODE" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::version_code must be a positive integer"
+            exit 1
+          fi
+
+      - name: Restore release keystore
+        shell: bash
+        env:
+          RISINGSTONES_RELEASE_KEYSTORE_BASE64: ${{ secrets.RISINGSTONES_RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$RISINGSTONES_RELEASE_KEYSTORE_BASE64" ||
+                -z "$RISINGSTONES_RELEASE_STORE_PASSWORD" ||
+                -z "$RISINGSTONES_RELEASE_KEY_ALIAS" ||
+                -z "$RISINGSTONES_RELEASE_KEY_PASSWORD" ]]; then
+            echo "::error::Release-candidate signing secrets are incomplete"
+            exit 1
+          fi
+
+          store_file="$RUNNER_TEMP/risingstones-release.p12"
+          printf '%s' "$RISINGSTONES_RELEASE_KEYSTORE_BASE64" |
+            base64 --decode > "$store_file"
+          chmod 600 "$store_file"
+          echo "RISINGSTONES_RELEASE_STORE_FILE=$store_file" >> "$GITHUB_ENV"
+
+          keytool -list \
+            -storetype "$RISINGSTONES_RELEASE_STORE_TYPE" \
+            -keystore "$store_file" \
+            -storepass "$RISINGSTONES_RELEASE_STORE_PASSWORD" \
+            -alias "$RISINGSTONES_RELEASE_KEY_ALIAS" > /dev/null
+
+      - name: Check public repository boundary
+        shell: bash
+        run: |
+          bash scripts/verify-repository-layout.sh
+          bash scripts/check-public-boundary.sh
+
+      - name: Build and verify release candidate
+        shell: bash
+        run: |
+          ./gradlew --no-daemon --no-configuration-cache \
+            verifyReleaseConfiguration \
+            verifyReleaseManifestSecurity \
+            testDebugUnitTest \
+            lintRelease \
+            assembleRelease \
+            bundleRelease \
+            publishPublicLibrariesToLocalRepository \
+            -PrisingStonesVersion="$CANDIDATE_VERSION" \
+            -PrisingStonesAppVersionName="$CANDIDATE_VERSION" \
+            -PrisingStonesAppVersionCode="$CANDIDATE_VERSION_CODE"
+          bash scripts/verify-local-publications.sh \
+            build/repository \
+            "$CANDIDATE_VERSION" \
+            true
+          bash scripts/verify-maven-api-consumption.sh \
+            . \
+            "$CANDIDATE_VERSION"
+
+      - name: Verify signed application artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="app/build/outputs/apk/release/app-release.apk"
+          bundle="app/build/outputs/bundle/release/app-release.aab"
+          test -f "$apk"
+          test -f "$bundle"
+
+          apksigner="$(
+            find "$ANDROID_SDK_ROOT/build-tools" -type f -name apksigner -print |
+              sort -V |
+              tail -n 1
+          )"
+          if [[ -z "$apksigner" ]]; then
+            echo "::error::Android SDK apksigner was not found"
+            exit 1
+          fi
+          "$apksigner" verify --verbose "$apk"
+          jarsigner \
+            -J-Duser.language=en \
+            -J-Duser.country=US \
+            -verify -verbose -certs "$bundle" \
+            > "$RUNNER_TEMP/rising-stones-aab-signature.txt"
+          grep -q "jar verified." "$RUNNER_TEMP/rising-stones-aab-signature.txt"
+
+      - name: Package candidate artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          destination="build/release-candidate"
+          mkdir -p "$destination"
+          cp app/build/outputs/apk/release/app-release.apk \
+            "$destination/rising-stones-$CANDIDATE_VERSION.apk"
+          cp app/build/outputs/bundle/release/app-release.aab \
+            "$destination/rising-stones-$CANDIDATE_VERSION.aab"
+          tar -czf "$destination/rising-stones-maven-$CANDIDATE_VERSION.tgz" \
+            -C build/repository .
+          (
+            cd "$destination"
+            sha256sum \
+              "rising-stones-$CANDIDATE_VERSION.apk" \
+              "rising-stones-$CANDIDATE_VERSION.aab" > APP_SHA256SUMS
+            sha256sum \
+              "rising-stones-maven-$CANDIDATE_VERSION.tgz" > MAVEN_SHA256SUMS
+          )
+
+      - name: Upload signed app candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: rising-stones-app-${{ inputs.version_name }}
+          path: |
+            build/release-candidate/rising-stones-${{ inputs.version_name }}.apk
+            build/release-candidate/rising-stones-${{ inputs.version_name }}.aab
+            build/release-candidate/APP_SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Maven candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: rising-stones-maven-${{ inputs.version_name }}
+          path: |
+            build/release-candidate/rising-stones-maven-${{ inputs.version_name }}.tgz
+            build/release-candidate/MAVEN_SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14

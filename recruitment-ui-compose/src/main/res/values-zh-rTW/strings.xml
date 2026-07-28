@@ -1,0 +1,24 @@
+<resources>
+    <string name="recruitment_title">招募板</string>
+    <string name="recruitment_back">返回</string>
+    <string name="recruitment_refresh">重新整理</string>
+    <string name="recruitment_retry">重試</string>
+    <string name="recruitment_loading">載入中…</string>
+    <string name="recruitment_more">載入更多</string>
+    <string name="recruitment_empty">暫無招募資訊。</string>
+    <string name="recruitment_select">請選擇一則招募資訊。</string>
+    <string name="recruitment_board_duty">副本招募</string>
+    <string name="recruitment_board_beginner">新人娛樂</string>
+    <string name="recruitment_board_guild">我的部隊</string>
+    <string name="recruitment_board_other">其他招募</string>
+    <string name="recruitment_board_roleplay">跑團招募</string>
+    <string name="recruitment_team">隊伍</string>
+    <string name="recruitment_requirements">招募要求</string>
+    <string name="recruitment_strategy">攻略說明</string>
+    <string name="recruitment_description">詳情</string>
+    <string name="recruitment_summary">摘要</string>
+    <string name="recruitment_refresh_detail">重新整理詳情</string>
+    <string name="recruitment_roleplay_extras">成員與評價</string>
+    <string name="recruitment_rating">評分 %1$.1f · %2$d 人參與</string>
+    <string name="recruitment_likes">%1$d 個讚</string>
+</resources>
