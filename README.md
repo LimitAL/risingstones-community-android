@@ -1,4 +1,4 @@
-# 石之家 Android 客户端
+# 石之家社区（非官方）Android 客户端
 
 面向石之家官方论坛及相关能力的非官方 Android 客户端，同时提供可供其他 Android 应用按需
 接入的领域层、数据层、状态管理层和可选 Compose 界面。本项目与服务运营方不存在隶属、授权
@@ -99,6 +99,9 @@ domain、data、presentation、默认 Compose 界面与自适应导航。
 项目源码采用 [MIT 许可证](LICENSE)。首次公开发布前仍需确定维护者公开联系信息和正式
 Maven 托管位置。详见[发布检查清单](docs/release-checklist.md)和
 [依赖许可证清单](docs/dependency-licenses.md)。
+
+应用使用原创的猫爪石印图标，不使用服务运营方的官方标识。名称、图标含义、配色和安全区
+约束见[品牌与图标说明](docs/brand.md)。
 
 ## 参与开发
 

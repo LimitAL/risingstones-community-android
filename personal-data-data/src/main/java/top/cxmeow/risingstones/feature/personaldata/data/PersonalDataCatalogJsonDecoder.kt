@@ -19,6 +19,8 @@ import top.cxmeow.risingstones.feature.personaldata.domain.GlamourCatalogStain
 import top.cxmeow.risingstones.feature.personaldata.domain.GlamourCatalogSummary
 import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataOfficialCatalogs
 import top.cxmeow.risingstones.feature.personaldata.domain.SavageRaidCatalogEntry
+import top.cxmeow.risingstones.feature.personaldata.domain.SavageRaidCatalogSeries
+import top.cxmeow.risingstones.feature.personaldata.domain.SavageRaidCatalogTier
 
 /**
  * Decodes optional game-data enrichments without coupling the public feature to their transport.
@@ -35,7 +37,8 @@ class PersonalDataCatalogJsonDecoder(
         glamourDocument: ByteArray?,
     ): PersonalDataOfficialCatalogs {
         val fishRows = document(fishDocument)?.objectValue("content")?.arrayValue("fish").orEmpty()
-        val series = document(savageDocument)?.objectValue("content")?.arrayValue("series").orEmpty()
+        val seriesRows = document(savageDocument)?.objectValue("content")?.arrayValue("series").orEmpty()
+        val savageSeries = seriesRows.mapNotNull(JsonElement::toSavageSeries)
         val glamourContent = document(glamourDocument)?.objectValue("content")
         return PersonalDataOfficialCatalogs(
             fish = fishRows.mapNotNull { element ->
@@ -48,20 +51,12 @@ class PersonalDataCatalogJsonDecoder(
                     patch = item.textValue("patch").orEmpty(),
                 )
             }.toMap(),
-            savageRaids = series.flatMap { seriesValue ->
-                (seriesValue as? JsonObject)?.arrayValue("tiers").orEmpty()
-            }.flatMap { tierValue ->
-                (tierValue as? JsonObject)?.arrayValue("raids").orEmpty()
-            }.mapNotNull { raidValue ->
-                val item = raidValue as? JsonObject ?: return@mapNotNull null
-                val id = item.intValue("instanceId", "instance_id") ?: return@mapNotNull null
-                id to SavageRaidCatalogEntry(
-                    instanceId = id,
-                    name = item.textValue("name").orEmpty(),
-                    imageId = item.intValue("imageId", "image_id"),
-                )
-            }.toMap(),
+            savageRaids = savageSeries
+                .flatMap(SavageRaidCatalogSeries::tiers)
+                .flatMap(SavageRaidCatalogTier::raids)
+                .associateBy(SavageRaidCatalogEntry::instanceId),
             glamour = glamourContent?.toGlamourCatalog(),
+            savageSeries = savageSeries,
         )
     }
 
@@ -71,6 +66,35 @@ class PersonalDataCatalogJsonDecoder(
             json.parseToJsonElement(bytes.decodeToString()).jsonObject
         }.getOrNull()?.takeIf { it.intValue("schemaVersion", "schema_version") == 1 }
     }
+}
+
+private fun JsonElement.toSavageSeries(): SavageRaidCatalogSeries? {
+    val item = this as? JsonObject ?: return null
+    return SavageRaidCatalogSeries(
+        name = item.textValue("name").orEmpty(),
+        abbreviation = item.textValue("abbreviation").orEmpty(),
+        tiers = item.arrayValue("tiers").mapNotNull(JsonElement::toSavageTier),
+    )
+}
+
+private fun JsonElement.toSavageTier(): SavageRaidCatalogTier? {
+    val item = this as? JsonObject ?: return null
+    return SavageRaidCatalogTier(
+        nameEnglish = item.textValue("nameEnglish", "name_english").orEmpty(),
+        nameChinese = item.textValue("nameChinese", "name_chinese").orEmpty(),
+        achievementOnly = item.booleanValue("achievementOnly", "achievement_only") ?: false,
+        achievementText = item.textValue("achievementText", "achievement_text"),
+        raids = item.arrayValue("raids").mapNotNull(JsonElement::toSavageRaid),
+    )
+}
+
+private fun JsonElement.toSavageRaid(): SavageRaidCatalogEntry? {
+    val item = this as? JsonObject ?: return null
+    return SavageRaidCatalogEntry(
+        instanceId = item.intValue("instanceId", "instance_id") ?: return null,
+        name = item.textValue("name").orEmpty(),
+        imageId = item.intValue("imageId", "image_id"),
+    )
 }
 
 private fun JsonObject.toGlamourCatalog(): GlamourCatalogSummary {

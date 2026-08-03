@@ -138,6 +138,20 @@ data class UltimateEncounterDetail(
 
 data class FishKingCatalogEntry(val itemId: Int, val iconId: Int, val name: String, val patch: String)
 data class SavageRaidCatalogEntry(val instanceId: Int, val name: String, val imageId: Int?)
+
+data class SavageRaidCatalogTier(
+    val nameEnglish: String,
+    val nameChinese: String,
+    val achievementOnly: Boolean,
+    val achievementText: String?,
+    val raids: List<SavageRaidCatalogEntry>,
+)
+
+data class SavageRaidCatalogSeries(
+    val name: String,
+    val abbreviation: String,
+    val tiers: List<SavageRaidCatalogTier>,
+)
 data class GlamourCatalogSetItem(
     val slotIndex: Int,
     val itemId: Int,
@@ -177,6 +191,7 @@ data class PersonalDataOfficialCatalogs(
     val fish: Map<Int, FishKingCatalogEntry> = emptyMap(),
     val savageRaids: Map<Int, SavageRaidCatalogEntry> = emptyMap(),
     val glamour: GlamourCatalogSummary? = null,
+    val savageSeries: List<SavageRaidCatalogSeries> = emptyList(),
 )
 
 fun interface PersonalDataCatalogProvider {
