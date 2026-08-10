@@ -16,6 +16,7 @@ import org.junit.Rule
 import org.junit.Test
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourAccessorySearchResult
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourAuthor
+import top.cxmeow.risingstones.feature.glamour.domain.GlamourAuthorProfile
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourDetail
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourEquipmentSearchResult
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourFavoriteFolder
@@ -104,6 +105,15 @@ private object FakeGlamourService : GlamourService {
     override suspend fun deleteFavoriteFolder(id: Int) = error("unused")
     override suspend fun fetchProfileStatistics(authorId: String?) =
         GlamourProfileStatistics(1, 2, 3)
+    override suspend fun fetchAuthorProfile(authorId: String) = GlamourAuthorProfile(
+        author = TestAuthor,
+        profile = null,
+        followingCount = 0,
+        followerCount = 0,
+        relation = 0,
+    )
+    override suspend fun followAuthor(authorId: String) = Unit
+    override suspend fun cancelFollowAuthor(authorId: String) = Unit
 
     override suspend fun fetchRaces(): List<GlamourRace> = emptyList()
     override suspend fun searchEquipment(name: String, page: Int):

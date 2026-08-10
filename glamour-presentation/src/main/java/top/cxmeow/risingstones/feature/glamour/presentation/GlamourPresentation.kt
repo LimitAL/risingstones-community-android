@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourAuthor
+import top.cxmeow.risingstones.feature.glamour.domain.GlamourAuthorProfile
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourDetail
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourFavoriteFolder
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourFilter
@@ -43,6 +44,11 @@ data class GlamourUiState(
     val profileStatistics: GlamourProfileStatistics? = null,
     val isLoadingProfileStatistics: Boolean = false,
     val profileStatisticsResolved: Boolean = false,
+    val authorProfile: GlamourAuthorProfile? = null,
+    val isLoadingAuthorProfile: Boolean = false,
+    val authorProfileResolved: Boolean = false,
+    val isUpdatingFollow: Boolean = false,
+    val followError: String? = null,
     val selectedId: Int? = null,
     val selectedDetail: GlamourDetail? = null,
     val isLoadingDetail: Boolean = false,
@@ -73,7 +79,10 @@ class GlamourViewModel(
             if (autoLoadList) {
                 refresh()
                 loadRaces()
-                if (profileAuthor != null) loadProfileStatistics()
+                if (profileAuthor != null) {
+                    loadProfileStatistics()
+                    loadAuthorProfile()
+                }
             }
         }
     }
@@ -171,6 +180,29 @@ class GlamourViewModel(
                 }
             }
         }
+    }
+
+    fun toggleFollow() {
+        val authorId = profileAuthor?.id?.takeIf(String::isNotBlank) ?: return
+        val current = mutableState.value.authorProfile?.isFollowing == true
+        if (mutableState.value.isUpdatingFollow) return
+        viewModelScope.launch {
+            mutableState.update { it.copy(isUpdatingFollow = true, followError = null) }
+            try {
+                if (current) service.cancelFollowAuthor(authorId) else service.followAuthor(authorId)
+                loadAuthorProfile()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                mutableState.update {
+                    it.copy(isUpdatingFollow = false, followError = error.message)
+                }
+            }
+        }
+    }
+
+    fun clearFollowError() {
+        mutableState.update { it.copy(followError = null) }
     }
 
     fun loadMore() {
@@ -432,6 +464,35 @@ class GlamourViewModel(
                         profileStatistics = null,
                         isLoadingProfileStatistics = false,
                         profileStatisticsResolved = true,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun loadAuthorProfile() {
+        val authorId = profileAuthor?.id?.takeIf(String::isNotBlank) ?: return
+        viewModelScope.launch {
+            mutableState.update { it.copy(isLoadingAuthorProfile = true, followError = null) }
+            try {
+                val profile = service.fetchAuthorProfile(authorId)
+                mutableState.update {
+                    it.copy(
+                        authorProfile = profile,
+                        isLoadingAuthorProfile = false,
+                        authorProfileResolved = true,
+                        isUpdatingFollow = false,
+                    )
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                mutableState.update {
+                    it.copy(
+                        isLoadingAuthorProfile = false,
+                        authorProfileResolved = true,
+                        isUpdatingFollow = false,
+                        followError = error.message,
                     )
                 }
             }

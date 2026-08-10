@@ -47,6 +47,15 @@ data class GlamourFavoriteFolder(
 )
 
 data class GlamourProfileStatistics(val posts: Int, val likes: Int, val favorites: Int)
+data class GlamourAuthorProfile(
+    val author: GlamourAuthor,
+    val profile: String?,
+    val followingCount: Int,
+    val followerCount: Int,
+    val relation: Int,
+) {
+    val isFollowing: Boolean get() = relation == 2
+}
 data class GlamourRace(val id: Int, val name: String)
 
 data class GlamourEquipmentSearchResult(
@@ -143,6 +152,9 @@ interface GlamourService {
     suspend fun createFavoriteFolder(name: String, isPublic: Boolean)
     suspend fun deleteFavoriteFolder(id: Int)
     suspend fun fetchProfileStatistics(authorId: String? = null): GlamourProfileStatistics
+    suspend fun fetchAuthorProfile(authorId: String): GlamourAuthorProfile
+    suspend fun followAuthor(authorId: String)
+    suspend fun cancelFollowAuthor(authorId: String)
     suspend fun fetchRaces(): List<GlamourRace>
     suspend fun searchEquipment(name: String, page: Int = 1): List<GlamourEquipmentSearchResult>
     suspend fun searchGlasses(name: String): List<GlamourGlassesSearchGroup>

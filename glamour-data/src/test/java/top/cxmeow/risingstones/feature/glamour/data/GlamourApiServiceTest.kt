@@ -181,6 +181,31 @@ class GlamourApiServiceTest {
     }
 
     @Test
+    fun authorProfileAndFollowUseIosContracts() = runBlocking {
+        val transport = GlamourTransport()
+        val service = service(transport)
+
+        val profile = service.fetchAuthorProfile("author-1")
+        service.followAuthor("author-1")
+        service.cancelFollowAuthor("author-1")
+
+        val profileRequest = transport.requests.first { it.url.toHttpUrl().encodedPath.endsWith("/getUserInfo") }
+        assertEquals("author-1", profileRequest.url.toHttpUrl().queryParameter("uuid"))
+        assertEquals("session-1", profileRequest.url.toHttpUrl().queryParameter("tempsuid"))
+        assertEquals("Hero", profile.author.characterName)
+        assertEquals("A glamour profile", profile.profile)
+        assertEquals(12, profile.followingCount)
+        assertEquals(34, profile.followerCount)
+        assertTrue(profile.isFollowing)
+
+        val follow = transport.requests.first { it.url.toHttpUrl().encodedPath.endsWith("/follow") }
+        assertEquals("author-1", follow.form()["follow_uuid"])
+        val cancel = transport.requests.first { it.url.toHttpUrl().encodedPath.endsWith("/cancelFollow") }
+        assertEquals(RisingStonesHttpMethod.Put, cancel.method)
+        assertEquals("{\"follow_uuid\":\"author-1\"}", requireNotNull(cancel.body).decodeToString())
+    }
+
+    @Test
     fun everyOperationRequiresRisingStonesIdentity() {
         val service = GlamourApiService(
             RisingStonesPublicApiClient(GlamourTransport(), listOf("https://rising.test")),
@@ -252,8 +277,10 @@ private class GlamourTransport : RisingStonesHttpClient {
             path.endsWith("/glamourDetail") -> DETAIL
             path.endsWith("/like") -> """{"code":10000,"data":"1"}"""
             path.endsWith("/createFavorites") || path.endsWith("/deleteFavorites") ||
-                path.endsWith("/favorite") || path.endsWith("/cancelFavorite") ->
+                path.endsWith("/favorite") || path.endsWith("/cancelFavorite") ||
+                path.endsWith("/follow") || path.endsWith("/cancelFollow") ->
                 """{"code":10000,"data":1}"""
+            path.endsWith("/getUserInfo") -> AUTHOR_PROFILE
             path.endsWith("/glamoursList") || path.endsWith("/myFavoriteItemsList") ||
                 path.endsWith("/myGlamoursList") || path.endsWith("/api/common/search") -> LIST
             else -> error("Unexpected request ${request.method} ${request.url}")
@@ -300,5 +327,13 @@ private val DETAIL = """
         "dye_ids":["1"],"dyes":[{"id":"1","name":"Snow White","color":"#eeeeee"}]}],
       "ort_info":{"glasses_id":"5","glasses_name":"Classic Spectacles","glasses_icon":"9",
         "ornament_id":"6","ornament_name":"Parasol","ornament_icon":"10"}
+    }}
+""".trimIndent()
+
+private val AUTHOR_PROFILE = """
+    {"code":10000,"data":{
+      "uuid":"author-1","character_name":"Hero","area_name":"World","group_name":"DC",
+      "avatar":"https://cdn.test/avatar.jpg","profile":"A glamour profile",
+      "follow_fansi_num":{"follow_num":"12","fans_num":"34"},"relation":"2"
     }}
 """.trimIndent()
