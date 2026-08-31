@@ -62,6 +62,24 @@ class OfficialForumViewModelsTest {
     }
 
     @Test
+    fun resubmittingCurrentSearchMatchesIosCommitSearch() = runTest {
+        val service = FakeOfficialForumService()
+        val viewModel = OfficialForumListViewModel(service)
+        viewModel.ensureLoaded()
+        advanceUntilIdle()
+
+        viewModel.setSearchText("topic")
+        viewModel.submitSearch()
+        advanceUntilIdle()
+        assertEquals(1, service.searchQueries.size)
+
+        viewModel.submitSearch()
+        advanceUntilIdle()
+        assertEquals(2, service.searchQueries.size)
+        assertEquals("topic", service.searchQueries.last().keywords)
+    }
+
+    @Test
     fun listPreservesConfirmedRowsOnFailureAndDeduplicatesPagination() = runTest {
         val service = FakeOfficialForumService()
         val viewModel = OfficialForumListViewModel(service)

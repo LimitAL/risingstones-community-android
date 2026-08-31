@@ -337,6 +337,19 @@ class GlamourApiService(
             data.arrayValue("equipments").mapNotNull(::equipment),
             ornament?.accessory("glasses") ,
             ornament?.accessory("ornament"),
+            (data.intValue("fashion_coupon", "fashionCoupon") ?: 0) == 1,
+            data.stringValue("inviate_code", "inviateCode")
+                ?.trim()
+                ?.takeIf(String::isNotEmpty),
+            (data.intValue("is_receive", "isReceive") ?: user?.intValue("is_receive", "isReceive") ?: 0) == 1,
+            (data.intValue("relation") ?: 0) == 2,
+        )
+    }
+
+    override suspend fun claimCoupon(inviteCode: String, glamourId: Int) {
+        form(
+            "api/home/glamourFashion/claimCoupon",
+            listOf("inviate_code" to inviteCode, "glamour_id" to "$glamourId"),
         )
     }
 
@@ -430,6 +443,7 @@ class GlamourApiService(
             item.intArray("job_ids", "jobIds"),
             item.intArray("race_ids", "raceIds"),
             item.intArray("gender_ids", "genderIds"),
+            (item.intValue("fashion_coupon", "fashionCoupon") ?: 0) == 1,
         )
     }
 

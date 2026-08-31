@@ -87,7 +87,11 @@ class OfficialForumListViewModel(private val service: OfficialForumService) : Vi
 
     fun submitSearch() {
         val normalized = mutableState.value.searchText.trim()
-        if (normalized.isEmpty() || normalized == mutableState.value.loadedSearchText) return
+        // iOS OfficialForumView.commitSearch() submits every non-empty query,
+        // including an explicit re-submit of the currently loaded keywords.
+        // Keep the keyboard Search action meaningful instead of treating the
+        // same text as a no-op on Android.
+        if (normalized.isEmpty()) return
         mutableState.update { it.copy(searchText = normalized) }
         refresh()
     }

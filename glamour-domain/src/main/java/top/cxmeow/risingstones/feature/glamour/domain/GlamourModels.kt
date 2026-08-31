@@ -101,6 +101,8 @@ data class GlamourListingSummary(
     val jobIds: List<Int>,
     val raceIds: List<Int>,
     val genderIds: List<Int>,
+    /** Whether the listing is eligible for the fashion coupon badge. */
+    val isCouponEligible: Boolean = false,
 )
 
 data class GlamourDetail(
@@ -118,6 +120,10 @@ data class GlamourDetail(
     val equipments: List<GlamourEquipment>,
     val faceAccessory: GlamourAccessory?,
     val fashionAccessory: GlamourAccessory?,
+    val isCouponEligible: Boolean = false,
+    val couponInviteCode: String? = null,
+    val isCouponClaimed: Boolean = false,
+    val isFollowingAuthor: Boolean = false,
 )
 
 data class GlamourAccessory(val id: Int, val name: String, val iconId: String?)
@@ -163,4 +169,7 @@ interface GlamourService {
     suspend fun favorite(id: Int)
     suspend fun cancelFavorite(id: Int)
     suspend fun toggleLike(id: Int): Boolean
+    suspend fun claimCoupon(inviteCode: String, glamourId: Int) {
+        throw UnsupportedOperationException("Coupon claiming is unavailable")
+    }
 }

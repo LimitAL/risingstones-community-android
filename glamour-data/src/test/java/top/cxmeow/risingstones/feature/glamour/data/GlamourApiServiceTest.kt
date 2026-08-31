@@ -64,6 +64,7 @@ class GlamourApiServiceTest {
         assertEquals("Hero", page.items.single().author.characterName)
         assertEquals(listOf(19, 20), page.items.single().jobIds)
         assertEquals(2, page.items.single().imageUrls.size)
+        assertTrue(page.items.single().isCouponEligible)
     }
 
     @Test
@@ -178,6 +179,17 @@ class GlamourApiServiceTest {
         assertEquals("Snow White", detail.equipments.single().dye(0)?.name)
         assertEquals("Classic Spectacles", detail.faceAccessory?.name)
         assertEquals("Parasol", detail.fashionAccessory?.name)
+        assertTrue(detail.isCouponEligible)
+        assertEquals("invite-42", detail.couponInviteCode)
+        assertTrue(detail.isCouponClaimed)
+        assertTrue(detail.isFollowingAuthor)
+
+        service.claimCoupon("invite-42", 42)
+        val claim = transport.requests.first {
+            it.url.toHttpUrl().encodedPath.endsWith("/claimCoupon")
+        }
+        assertEquals("invite-42", claim.form()["inviate_code"])
+        assertEquals("42", claim.form()["glamour_id"])
     }
 
     @Test
@@ -278,7 +290,8 @@ private class GlamourTransport : RisingStonesHttpClient {
             path.endsWith("/like") -> """{"code":10000,"data":"1"}"""
             path.endsWith("/createFavorites") || path.endsWith("/deleteFavorites") ||
                 path.endsWith("/favorite") || path.endsWith("/cancelFavorite") ||
-                path.endsWith("/follow") || path.endsWith("/cancelFollow") ->
+                path.endsWith("/follow") || path.endsWith("/cancelFollow") ||
+                path.endsWith("/claimCoupon") ->
                 """{"code":10000,"data":1}"""
             path.endsWith("/getUserInfo") -> AUTHOR_PROFILE
             path.endsWith("/glamoursList") || path.endsWith("/myFavoriteItemsList") ||
@@ -303,6 +316,7 @@ private val LIST = """
       "main_image":"https://cdn.test/main.jpg",
       "images":"https://cdn.test/main.jpg,https://cdn.test/second.jpg",
       "likes":"8","favorites":3,"is_like":"1","is_favorite":0,
+      "fashion_coupon":"1",
       "job_ids":["19",20],"race_ids":[1],"gender_ids":["2"],
       "glamour_created_at":"2026-07-21 12:00:00","uuid":"author-1",
       "character_name":"Hero","area_name":"World","group_name":"DC"
@@ -321,6 +335,7 @@ private val DETAIL = """
       "main_image":"https://cdn.test/main.jpg","images":"https://cdn.test/second.jpg",
       "likes":"8","favorites":3,"is_like":"1","is_favorite":0,
       "created_at":"2026-07-21 12:00:00","uuid":"author-1",
+      "fashion_coupon":"1","inviate_code":"invite-42","is_receive":"1","relation":"2",
       "character_name":"Hero","area_name":"World","group_name":"DC",
       "race_ids":[{"id":"1","name":"Hyur"}],
       "equipments":[{"slot":"BODY","equipment_id":"100","name":"Body","icon_id":"200",
