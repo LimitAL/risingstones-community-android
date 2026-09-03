@@ -8,6 +8,14 @@ import top.cxmeow.risingstones.feature.forum.domain.OfficialForumRichTextSegment
 
 class OfficialForumHtmlTest {
     @Test
+    fun exposesRichSegmentsThroughPublicClientFacade() {
+        val segments = OfficialForumHtmlParser.richSegments("hello [emo2]")
+
+        assertEquals(2, segments.size)
+        assertTrue(segments.last() is OfficialForumRichTextSegment.Emoji)
+    }
+
+    @Test
     fun keepsInlineImagesInSourceOrderWithLinksAndEmoji() {
         val segments = OfficialForumHtml.richSegments(
             "before <a href=\"https://example.test/post/1\">link</a><img src=\"https://cdn.test/a.png\" width=\"120\">[emo2] after",

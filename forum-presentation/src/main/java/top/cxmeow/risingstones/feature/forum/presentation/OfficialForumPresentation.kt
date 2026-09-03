@@ -259,6 +259,7 @@ data class OfficialForumDetailUiState(
     val subCommentsByRootId: Map<Int, List<OfficialForumComment>> = emptyMap(),
     val subCommentTotals: Map<Int, Int> = emptyMap(),
     val loadingSubCommentIds: Set<Int> = emptySet(),
+    val subCommentErrorIds: Set<Int> = emptySet(),
     val isLikingPost: Boolean = false,
     val isStarringPost: Boolean = false,
     val isSubmittingComment: Boolean = false,
@@ -302,6 +303,7 @@ class OfficialForumDetailViewModel(
                         commentsStatus = OfficialForumLoadStatus.Loaded,
                         subCommentsByRootId = emptyMap(),
                         subCommentTotals = emptyMap(),
+                        subCommentErrorIds = emptySet(),
                     )
                 }
                 loadPreviews(comments.items)
@@ -338,6 +340,7 @@ class OfficialForumDetailViewModel(
                         commentsStatus = OfficialForumLoadStatus.Loaded,
                         subCommentsByRootId = emptyMap(),
                         subCommentTotals = emptyMap(),
+                        subCommentErrorIds = emptySet(),
                     )
                 }
                 loadPreviews(page.items)
@@ -526,7 +529,12 @@ class OfficialForumDetailViewModel(
 
     private fun loadAllSubComments(comment: OfficialForumComment) {
         if (comment.id in mutableState.value.loadingSubCommentIds) return
-        mutableState.update { it.copy(loadingSubCommentIds = it.loadingSubCommentIds + comment.id) }
+        mutableState.update {
+            it.copy(
+                loadingSubCommentIds = it.loadingSubCommentIds + comment.id,
+                subCommentErrorIds = it.subCommentErrorIds - comment.id,
+            )
+        }
         viewModelScope.launch {
             try {
                 val loaded = mutableListOf<OfficialForumComment>()
@@ -546,13 +554,17 @@ class OfficialForumDetailViewModel(
                             (comment.id to loaded.distinctBy(OfficialForumComment::id)),
                         subCommentTotals = it.subCommentTotals + (comment.id to total),
                         loadingSubCommentIds = it.loadingSubCommentIds - comment.id,
+                        subCommentErrorIds = it.subCommentErrorIds - comment.id,
                     )
                 }
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
                 mutableState.update {
-                    it.copy(loadingSubCommentIds = it.loadingSubCommentIds - comment.id)
+                    it.copy(
+                        loadingSubCommentIds = it.loadingSubCommentIds - comment.id,
+                        subCommentErrorIds = it.subCommentErrorIds + comment.id,
+                    )
                 }
             }
         }
