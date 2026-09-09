@@ -56,7 +56,21 @@ dependencyResolutionManagement {
 }
 ```
 
-正式版本发布后，把本地仓库替换为公开 Maven 仓库，并把 `0.1.0-SNAPSHOT` 改为正式版本。
+正式版本使用本仓库的 GitHub Packages Gradle registry：
+
+```kotlin
+maven {
+    url = uri("https://maven.pkg.github.com/LimitAL/risingstones-community-android")
+    credentials {
+        username = providers.environmentVariable("GITHUB_ACTOR").orNull
+        password = providers.environmentVariable("GITHUB_TOKEN").orNull
+    }
+}
+```
+
+GitHub Actions 接入方使用获得本 Package 读取权限的 `GITHUB_TOKEN`；本地开发使用具备
+`read:packages` 权限的 GitHub token。依赖版本必须改为已发布的固定版本，禁止使用动态版本或
+`SNAPSHOT`。
 
 当前制品使用 Kotlin 2.4 metadata。Kotlin 接入方应使用 Kotlin 2.4 或更新版本，不支持通过
 关闭 metadata 兼容性检查规避版本要求。公共 API 以 Kotlin 为主。

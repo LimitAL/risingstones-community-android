@@ -227,6 +227,10 @@ allprojects {
 
 val publicLibraryProjects = subprojects.filter { it.name != "app" }
 val localBuildRepository = layout.buildDirectory.dir("repository")
+val githubPackagesRepositoryUrl = providers.gradleProperty("risingStonesGitHubPackagesUrl")
+    .orElse("https://maven.pkg.github.com/LimitAL/risingstones-community-android")
+val githubPackagesUsername = providers.environmentVariable("GITHUB_ACTOR")
+val githubPackagesToken = providers.environmentVariable("GITHUB_TOKEN")
 val publicReleaseVersion = providers.gradleProperty("risingStonesVersion")
     .orElse("0.1.0-SNAPSHOT")
 val publicAppVersionName = providers.gradleProperty("risingStonesAppVersionName")
@@ -300,6 +304,14 @@ subprojects {
                     name = "localBuild"
                     url = localBuildRepository.get().asFile.toURI()
                 }
+                maven {
+                    name = "GitHubPackages"
+                    url = uri(githubPackagesRepositoryUrl.get())
+                    credentials {
+                        username = githubPackagesUsername.orNull
+                        password = githubPackagesToken.orNull
+                    }
+                }
             }
         }
 
@@ -350,6 +362,17 @@ val publishPublicLibrariesToLocalRepository =
         dependsOn(
             publicLibraryProjects.map {
                 "${it.path}:publishReleasePublicationToLocalBuildRepository"
+            },
+        )
+    }
+
+val publishPublicLibrariesToGitHubPackagesRepository =
+    tasks.register("publishPublicLibrariesToGitHubPackagesRepository") {
+        group = "publishing"
+        description = "Publishes every reusable library to GitHub Packages."
+        dependsOn(
+            publicLibraryProjects.map {
+                "${it.path}:publishReleasePublicationToGitHubPackagesRepository"
             },
         )
     }

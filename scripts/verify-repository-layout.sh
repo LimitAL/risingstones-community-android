@@ -11,6 +11,7 @@ required_files=(
   .github/dependabot.yml
   .github/pull_request_template.md
   .github/workflows/release-candidate.yml
+  .github/workflows/release.yml
   .github/workflows/verify.yml
   CONTRIBUTING.md
   LICENSE
