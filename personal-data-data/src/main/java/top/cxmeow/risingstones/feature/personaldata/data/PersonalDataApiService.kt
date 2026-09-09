@@ -327,6 +327,9 @@ private val definitions = mapOf(
             metric("gc_id"), metric("pvp_rank", PersonalDataMetricUnit.Levels),
             metric("series_level", PersonalDataMetricUnit.Levels), metric("win_times", PersonalDataMetricUnit.Times),
             metric("assist_times", PersonalDataMetricUnit.Times), metric("dead_times", PersonalDataMetricUnit.Times),
+            metric("clear_time"), metric("occupy_count"),
+            metric("kill_rank"), metric("heal_rank"), metric("damaged_rank"),
+            metric("damage_rank"), metric("dead_rank"), metric("assist_rank"),
         ),
         listOf(
             section("weekly", "frontline2WeekNew"), section("job", "frontline3JobNew"),

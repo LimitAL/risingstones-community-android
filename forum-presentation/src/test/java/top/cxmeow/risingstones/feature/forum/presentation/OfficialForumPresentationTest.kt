@@ -62,6 +62,24 @@ class OfficialForumViewModelsTest {
     }
 
     @Test
+    fun resubmittingCurrentSearchMatchesIosCommitSearch() = runTest {
+        val service = FakeOfficialForumService()
+        val viewModel = OfficialForumListViewModel(service)
+        viewModel.ensureLoaded()
+        advanceUntilIdle()
+
+        viewModel.setSearchText("topic")
+        viewModel.submitSearch()
+        advanceUntilIdle()
+        assertEquals(1, service.searchQueries.size)
+
+        viewModel.submitSearch()
+        advanceUntilIdle()
+        assertEquals(2, service.searchQueries.size)
+        assertEquals("topic", service.searchQueries.last().keywords)
+    }
+
+    @Test
     fun listPreservesConfirmedRowsOnFailureAndDeduplicatesPagination() = runTest {
         val service = FakeOfficialForumService()
         val viewModel = OfficialForumListViewModel(service)
@@ -102,6 +120,19 @@ class OfficialForumViewModelsTest {
     }
 
     @Test
+    fun detailMarksNestedReplyFailureForRetry() = runTest {
+        val service = FakeOfficialForumService().apply { failSubComments = true }
+        val viewModel = OfficialForumDetailViewModel(service, 42)
+        advanceUntilIdle()
+
+        viewModel.openSubComments(COMMENT)
+        advanceUntilIdle()
+
+        assertTrue(9 in viewModel.state.value.subCommentErrorIds)
+        assertFalse(9 in viewModel.state.value.loadingSubCommentIds)
+    }
+
+    @Test
     fun authenticatedActionsUpdateDetailAndPreserveExactReplyMarkup() = runTest {
         val service = FakeOfficialForumService()
         val viewModel = OfficialForumDetailViewModel(service, 42)
@@ -136,6 +167,7 @@ class OfficialForumViewModelsTest {
 private class FakeOfficialForumService : OfficialForumService {
     override val canPerformAuthenticatedWrites = false
     var failReads = false
+    var failSubComments = false
     val listQueries = mutableListOf<OfficialForumListQuery>()
     val searchQueries = mutableListOf<OfficialForumSearchQuery>()
     val commentQueries = mutableListOf<OfficialForumCommentQuery>()
@@ -170,6 +202,7 @@ private class FakeOfficialForumService : OfficialForumService {
     override suspend fun fetchSubComments(
         query: OfficialForumSubCommentQuery,
     ): OfficialForumPage<OfficialForumComment> {
+        if (failSubComments) error("nested replies unavailable")
         val values = if (query.limit == 3) CHILDREN.take(2) else CHILDREN
         return OfficialForumPage(values, CHILDREN.size, query.page)
     }

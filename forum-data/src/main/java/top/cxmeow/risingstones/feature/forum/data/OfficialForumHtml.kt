@@ -208,3 +208,12 @@ internal object OfficialForumHtml {
         }?.toString()
     }
 }
+
+/**
+ * Public entry point for clients that need to render official-forum rich text
+ * outside the forum feature itself (for example recruitment reviews).
+ */
+object OfficialForumHtmlParser {
+    fun richSegments(html: String): List<OfficialForumRichTextSegment> =
+        OfficialForumHtml.richSegments(html)
+}

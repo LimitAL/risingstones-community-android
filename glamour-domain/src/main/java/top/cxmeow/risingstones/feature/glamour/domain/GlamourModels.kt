@@ -47,6 +47,15 @@ data class GlamourFavoriteFolder(
 )
 
 data class GlamourProfileStatistics(val posts: Int, val likes: Int, val favorites: Int)
+data class GlamourAuthorProfile(
+    val author: GlamourAuthor,
+    val profile: String?,
+    val followingCount: Int,
+    val followerCount: Int,
+    val relation: Int,
+) {
+    val isFollowing: Boolean get() = relation == 2
+}
 data class GlamourRace(val id: Int, val name: String)
 
 data class GlamourEquipmentSearchResult(
@@ -92,6 +101,8 @@ data class GlamourListingSummary(
     val jobIds: List<Int>,
     val raceIds: List<Int>,
     val genderIds: List<Int>,
+    /** Whether the listing is eligible for the fashion coupon badge. */
+    val isCouponEligible: Boolean = false,
 )
 
 data class GlamourDetail(
@@ -109,6 +120,10 @@ data class GlamourDetail(
     val equipments: List<GlamourEquipment>,
     val faceAccessory: GlamourAccessory?,
     val fashionAccessory: GlamourAccessory?,
+    val isCouponEligible: Boolean = false,
+    val couponInviteCode: String? = null,
+    val isCouponClaimed: Boolean = false,
+    val isFollowingAuthor: Boolean = false,
 )
 
 data class GlamourAccessory(val id: Int, val name: String, val iconId: String?)
@@ -143,6 +158,9 @@ interface GlamourService {
     suspend fun createFavoriteFolder(name: String, isPublic: Boolean)
     suspend fun deleteFavoriteFolder(id: Int)
     suspend fun fetchProfileStatistics(authorId: String? = null): GlamourProfileStatistics
+    suspend fun fetchAuthorProfile(authorId: String): GlamourAuthorProfile
+    suspend fun followAuthor(authorId: String)
+    suspend fun cancelFollowAuthor(authorId: String)
     suspend fun fetchRaces(): List<GlamourRace>
     suspend fun searchEquipment(name: String, page: Int = 1): List<GlamourEquipmentSearchResult>
     suspend fun searchGlasses(name: String): List<GlamourGlassesSearchGroup>
@@ -151,4 +169,7 @@ interface GlamourService {
     suspend fun favorite(id: Int)
     suspend fun cancelFavorite(id: Int)
     suspend fun toggleLike(id: Int): Boolean
+    suspend fun claimCoupon(inviteCode: String, glamourId: Int) {
+        throw UnsupportedOperationException("Coupon claiming is unavailable")
+    }
 }

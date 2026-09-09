@@ -64,6 +64,7 @@ class GlamourApiServiceTest {
         assertEquals("Hero", page.items.single().author.characterName)
         assertEquals(listOf(19, 20), page.items.single().jobIds)
         assertEquals(2, page.items.single().imageUrls.size)
+        assertTrue(page.items.single().isCouponEligible)
     }
 
     @Test
@@ -178,6 +179,42 @@ class GlamourApiServiceTest {
         assertEquals("Snow White", detail.equipments.single().dye(0)?.name)
         assertEquals("Classic Spectacles", detail.faceAccessory?.name)
         assertEquals("Parasol", detail.fashionAccessory?.name)
+        assertTrue(detail.isCouponEligible)
+        assertEquals("invite-42", detail.couponInviteCode)
+        assertTrue(detail.isCouponClaimed)
+        assertTrue(detail.isFollowingAuthor)
+
+        service.claimCoupon("invite-42", 42)
+        val claim = transport.requests.first {
+            it.url.toHttpUrl().encodedPath.endsWith("/claimCoupon")
+        }
+        assertEquals("invite-42", claim.form()["inviate_code"])
+        assertEquals("42", claim.form()["glamour_id"])
+    }
+
+    @Test
+    fun authorProfileAndFollowUseIosContracts() = runBlocking {
+        val transport = GlamourTransport()
+        val service = service(transport)
+
+        val profile = service.fetchAuthorProfile("author-1")
+        service.followAuthor("author-1")
+        service.cancelFollowAuthor("author-1")
+
+        val profileRequest = transport.requests.first { it.url.toHttpUrl().encodedPath.endsWith("/getUserInfo") }
+        assertEquals("author-1", profileRequest.url.toHttpUrl().queryParameter("uuid"))
+        assertEquals("session-1", profileRequest.url.toHttpUrl().queryParameter("tempsuid"))
+        assertEquals("Hero", profile.author.characterName)
+        assertEquals("A glamour profile", profile.profile)
+        assertEquals(12, profile.followingCount)
+        assertEquals(34, profile.followerCount)
+        assertTrue(profile.isFollowing)
+
+        val follow = transport.requests.first { it.url.toHttpUrl().encodedPath.endsWith("/follow") }
+        assertEquals("author-1", follow.form()["follow_uuid"])
+        val cancel = transport.requests.first { it.url.toHttpUrl().encodedPath.endsWith("/cancelFollow") }
+        assertEquals(RisingStonesHttpMethod.Put, cancel.method)
+        assertEquals("{\"follow_uuid\":\"author-1\"}", requireNotNull(cancel.body).decodeToString())
     }
 
     @Test
@@ -252,8 +289,11 @@ private class GlamourTransport : RisingStonesHttpClient {
             path.endsWith("/glamourDetail") -> DETAIL
             path.endsWith("/like") -> """{"code":10000,"data":"1"}"""
             path.endsWith("/createFavorites") || path.endsWith("/deleteFavorites") ||
-                path.endsWith("/favorite") || path.endsWith("/cancelFavorite") ->
+                path.endsWith("/favorite") || path.endsWith("/cancelFavorite") ||
+                path.endsWith("/follow") || path.endsWith("/cancelFollow") ||
+                path.endsWith("/claimCoupon") ->
                 """{"code":10000,"data":1}"""
+            path.endsWith("/getUserInfo") -> AUTHOR_PROFILE
             path.endsWith("/glamoursList") || path.endsWith("/myFavoriteItemsList") ||
                 path.endsWith("/myGlamoursList") || path.endsWith("/api/common/search") -> LIST
             else -> error("Unexpected request ${request.method} ${request.url}")
@@ -276,6 +316,7 @@ private val LIST = """
       "main_image":"https://cdn.test/main.jpg",
       "images":"https://cdn.test/main.jpg,https://cdn.test/second.jpg",
       "likes":"8","favorites":3,"is_like":"1","is_favorite":0,
+      "fashion_coupon":"1",
       "job_ids":["19",20],"race_ids":[1],"gender_ids":["2"],
       "glamour_created_at":"2026-07-21 12:00:00","uuid":"author-1",
       "character_name":"Hero","area_name":"World","group_name":"DC"
@@ -294,11 +335,20 @@ private val DETAIL = """
       "main_image":"https://cdn.test/main.jpg","images":"https://cdn.test/second.jpg",
       "likes":"8","favorites":3,"is_like":"1","is_favorite":0,
       "created_at":"2026-07-21 12:00:00","uuid":"author-1",
+      "fashion_coupon":"1","inviate_code":"invite-42","is_receive":"1","relation":"2",
       "character_name":"Hero","area_name":"World","group_name":"DC",
       "race_ids":[{"id":"1","name":"Hyur"}],
       "equipments":[{"slot":"BODY","equipment_id":"100","name":"Body","icon_id":"200",
         "dye_ids":["1"],"dyes":[{"id":"1","name":"Snow White","color":"#eeeeee"}]}],
       "ort_info":{"glasses_id":"5","glasses_name":"Classic Spectacles","glasses_icon":"9",
         "ornament_id":"6","ornament_name":"Parasol","ornament_icon":"10"}
+    }}
+""".trimIndent()
+
+private val AUTHOR_PROFILE = """
+    {"code":10000,"data":{
+      "uuid":"author-1","character_name":"Hero","area_name":"World","group_name":"DC",
+      "avatar":"https://cdn.test/avatar.jpg","profile":"A glamour profile",
+      "follow_fansi_num":{"follow_num":"12","fans_num":"34"},"relation":"2"
     }}
 """.trimIndent()

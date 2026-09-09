@@ -1,0 +1,263 @@
+name: Publish Android release
+
+on:
+  push:
+    tags:
+      - "v[0-9]*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Existing release tag, for example v0.1.0"
+        required: true
+        type: string
+      prerelease:
+        description: "Publish as a pre-release"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: risingstones-android-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build, sign, and publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    env:
+      RISINGSTONES_RELEASE_STORE_TYPE: PKCS12
+      RISINGSTONES_RELEASE_STORE_PASSWORD: ${{ secrets.RISINGSTONES_RELEASE_STORE_PASSWORD }}
+      RISINGSTONES_RELEASE_KEY_ALIAS: ${{ secrets.RISINGSTONES_RELEASE_KEY_ALIAS }}
+      RISINGSTONES_RELEASE_KEY_PASSWORD: ${{ secrets.RISINGSTONES_RELEASE_KEY_PASSWORD }}
+      GITHUB_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref }}
+          fetch-depth: 0
+
+      - name: Resolve release metadata
+        id: release
+        shell: bash
+        env:
+          INPUT_TAG_NAME: ${{ inputs.tag_name }}
+          INPUT_PRERELEASE: ${{ inputs.prerelease }}
+          VERSION_CODE_OFFSET: ${{ vars.ANDROID_VERSION_CODE_OFFSET }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            tag="$INPUT_TAG_NAME"
+          else
+            tag="$GITHUB_REF_NAME"
+          fi
+
+          if [[ ! "$tag" =~ ^v[0-9]+(\.[0-9]+){1,2}([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Release tag must look like v0.1.0 or v0.1.0-beta.1"
+            exit 1
+          fi
+
+          git show-ref --tags --verify --quiet "refs/tags/$tag" || {
+            echo "::error::Tag $tag does not exist in the repository"
+            exit 1
+          }
+
+          offset="${VERSION_CODE_OFFSET:-0}"
+          if [[ ! "$offset" =~ ^[0-9]+$ ]]; then
+            echo "::error::ANDROID_VERSION_CODE_OFFSET must be a non-negative integer"
+            exit 1
+          fi
+
+          version_code=$((offset + GITHUB_RUN_NUMBER))
+          if (( version_code < 1 || version_code > 2100000000 )); then
+            echo "::error::Resolved Android versionCode is outside the supported range"
+            exit 1
+          fi
+
+          version_name="${tag#v}"
+          prerelease=false
+          if [[ "$version_name" == *-* || "$INPUT_PRERELEASE" == "true" ]]; then
+            prerelease=true
+          fi
+
+          {
+            echo "tag=$tag"
+            echo "version_name=$version_name"
+            echo "version_code=$version_code"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up JDK
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v5
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
+
+      - name: Restore release keystore
+        shell: bash
+        env:
+          RISINGSTONES_RELEASE_KEYSTORE_BASE64: ${{ secrets.RISINGSTONES_RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$RISINGSTONES_RELEASE_KEYSTORE_BASE64" ||
+                -z "$RISINGSTONES_RELEASE_STORE_PASSWORD" ||
+                -z "$RISINGSTONES_RELEASE_KEY_ALIAS" ||
+                -z "$RISINGSTONES_RELEASE_KEY_PASSWORD" ]]; then
+            echo "::error::Release signing secrets are incomplete"
+            exit 1
+          fi
+
+          store_file="$RUNNER_TEMP/risingstones-release.p12"
+          printf '%s' "$RISINGSTONES_RELEASE_KEYSTORE_BASE64" |
+            base64 --decode > "$store_file"
+          chmod 600 "$store_file"
+          echo "RISINGSTONES_RELEASE_STORE_FILE=$store_file" >> "$GITHUB_ENV"
+
+          keytool -list \
+            -storetype "$RISINGSTONES_RELEASE_STORE_TYPE" \
+            -keystore "$store_file" \
+            -storepass "$RISINGSTONES_RELEASE_STORE_PASSWORD" \
+            -alias "$RISINGSTONES_RELEASE_KEY_ALIAS" > /dev/null
+
+      - name: Check public repository boundary
+        shell: bash
+        run: |
+          bash scripts/verify-repository-layout.sh
+          bash scripts/check-public-boundary.sh
+
+      - name: Build and verify release
+        shell: bash
+        run: |
+          ./gradlew --no-daemon --no-configuration-cache \
+            verifyReleaseConfiguration \
+            verifyReleaseManifestSecurity \
+            testDebugUnitTest \
+            lintRelease \
+            assembleRelease \
+            bundleRelease \
+            publishPublicLibrariesToLocalRepository \
+            -PrisingStonesVersion="${{ steps.release.outputs.version_name }}" \
+            -PrisingStonesAppVersionName="${{ steps.release.outputs.version_name }}" \
+            -PrisingStonesAppVersionCode="${{ steps.release.outputs.version_code }}"
+          bash scripts/verify-local-publications.sh \
+            build/repository \
+            "${{ steps.release.outputs.version_name }}" \
+            true
+          bash scripts/verify-maven-api-consumption.sh \
+            . \
+            "${{ steps.release.outputs.version_name }}"
+
+      - name: Verify signed application artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="app/build/outputs/apk/release/app-release.apk"
+          bundle="app/build/outputs/bundle/release/app-release.aab"
+          test -f "$apk"
+          test -f "$bundle"
+
+          apksigner="$(
+            find "$ANDROID_SDK_ROOT/build-tools" -type f -name apksigner -print |
+              sort -V |
+              tail -n 1
+          )"
+          if [[ -z "$apksigner" ]]; then
+            echo "::error::Android SDK apksigner was not found"
+            exit 1
+          fi
+          "$apksigner" verify --verbose --print-certs "$apk"
+          bundle_verification="$(jarsigner -verify "$bundle" 2>&1)"
+          if [[ "$bundle_verification" != *"jar verified."* ]]; then
+            echo "$bundle_verification"
+            echo "::error::The Android App Bundle is not signed correctly"
+            exit 1
+          fi
+
+      - name: Publish Maven libraries to GitHub Packages
+        shell: bash
+        run: |
+          ./gradlew --no-daemon --no-configuration-cache \
+            publishPublicLibrariesToGitHubPackagesRepository \
+            -PrisingStonesVersion="${{ steps.release.outputs.version_name }}"
+
+      - name: Package release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          destination="build/release"
+          version="${{ steps.release.outputs.version_name }}"
+          mkdir -p "$destination"
+          cp app/build/outputs/apk/release/app-release.apk \
+            "$destination/rising-stones-$version.apk"
+          cp app/build/outputs/bundle/release/app-release.aab \
+            "$destination/rising-stones-$version.aab"
+          sha256sum \
+            "$destination/rising-stones-$version.apk" \
+            "$destination/rising-stones-$version.aab" > "$destination/SHA256SUMS.txt"
+
+      - name: Create GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          IS_PRERELEASE: ${{ steps.release.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          release_args=(
+            "$RELEASE_TAG"
+            build/release/*
+            --verify-tag
+            --generate-notes
+            --title "Rising Stones Android ${{ steps.release.outputs.version_name }}"
+          )
+          if [[ "$IS_PRERELEASE" == "true" ]]; then
+            release_args+=(--prerelease --latest=false)
+          fi
+
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            echo "::error::GitHub Release $RELEASE_TAG already exists; publish fixes with a new version tag"
+            exit 1
+          fi
+          gh release create "${release_args[@]}"
+
+      - name: Create downstream dispatch token
+        id: downstream-token
+        if: ${{ vars.DOWNSTREAM_GITHUB_APP_ID != '' && vars.DOWNSTREAM_OWNER != '' && vars.DOWNSTREAM_REPOSITORY != '' }}
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.DOWNSTREAM_GITHUB_APP_ID }}
+          private-key: ${{ secrets.DOWNSTREAM_GITHUB_APP_PRIVATE_KEY }}
+          owner: ${{ vars.DOWNSTREAM_OWNER }}
+          repositories: ${{ vars.DOWNSTREAM_REPOSITORY }}
+
+      - name: Trigger downstream compatibility build
+        if: ${{ vars.DOWNSTREAM_GITHUB_APP_ID != '' && vars.DOWNSTREAM_OWNER != '' && vars.DOWNSTREAM_REPOSITORY != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.downstream-token.outputs.token }}
+        run: |
+          gh api --method POST \
+            "repos/${{ vars.DOWNSTREAM_OWNER }}/${{ vars.DOWNSTREAM_REPOSITORY }}/dispatches" \
+            -f event_type=dependency-released \
+            -f "client_payload[group]=top.cxmeow.risingstones" \
+            -f "client_payload[version]=${{ steps.release.outputs.version_name }}" \
+            -f "client_payload[source_tag]=${{ steps.release.outputs.tag }}" \
+            -f "client_payload[source_sha]=$GITHUB_SHA" \
+            -f "client_payload[source_repository]=$GITHUB_REPOSITORY"
+
+      - name: Report downstream automation status
+        if: ${{ vars.DOWNSTREAM_GITHUB_APP_ID == '' || vars.DOWNSTREAM_OWNER == '' || vars.DOWNSTREAM_REPOSITORY == '' }}
+        shell: bash
+        run: |
+          echo "::notice::Downstream GitHub App dispatch is not configured; skipping compatibility notification"

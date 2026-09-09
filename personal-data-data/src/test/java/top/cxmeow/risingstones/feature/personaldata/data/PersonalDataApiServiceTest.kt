@@ -79,6 +79,16 @@ class PersonalDataApiServiceTest {
         assertTrue(availability.hasData(PersonalDataBoard.Ultimate) == true)
         assertEquals("30", frontline.frontlinePeriods.single { it.kind == FrontlinePeriodKind.Total }
             .metrics.single { it.id == "fight_times" }.value)
+        assertEquals(
+            "86",
+            frontline.frontlinePeriods.single { it.kind == FrontlinePeriodKind.Total }
+                .metrics.single { it.id == "kill_rank" }.value,
+        )
+        assertEquals(
+            "19.5",
+            frontline.frontlinePeriods.single { it.kind == FrontlinePeriodKind.Total }
+                .metrics.single { it.id == "clear_time" }.value,
+        )
         assertFalse(frontline.sections.first().entries.first().fields.any { it.key == "character_id" })
         assertEquals("120", fishing.metrics.first().value)
         assertEquals("12", savage.metrics.first().value)
@@ -138,6 +148,17 @@ class PersonalDataApiServiceTest {
 
         assertEquals("扎尔艾拉", result.fish.getValue(7678).name)
         assertEquals("轻量级1", result.savageRaids.getValue(1226).name)
+        with(result.savageSeries.single()) {
+            assertEquals("Arcadion", name)
+            assertEquals("AAC", abbreviation)
+            with(tiers.single()) {
+                assertEquals("Light-heavyweight", nameEnglish)
+                assertEquals("轻量级", nameChinese)
+                assertTrue(achievementOnly)
+                assertEquals("Complete all raids", achievementText)
+                assertEquals(1226, raids.single().instanceId)
+            }
+        }
         assertEquals(2, result.glamour?.setCount)
         assertEquals("Scholar set", result.glamour?.sets?.first()?.name)
         assertEquals("Ruby red", result.glamour?.stains?.first()?.name)
@@ -181,7 +202,7 @@ private class PersonalDataTransport : RisingStonesHttpClient {
         val payload = when {
             path.endsWith("getCharacterBindInfo") -> """{"code":10000,"data":{"character_name":"Hero","area_name":"陆行鸟","group_name":"红玉海"}}"""
             path.endsWith("dataOpenStatus") -> """{"code":10000,"data":{"pvp":"1","jue4":"1","fishing":"1","lingshi":"1","vanity":"1"}}"""
-            path.endsWith("frontline1TotalNew") -> """{"code":10000,"data":[{"data_time":"total","fight_times":"30","win_rate":"0.4"},{"data_time":"30days","fight_times":"10"}]}"""
+            path.endsWith("frontline1TotalNew") -> """{"code":10000,"data":[{"data_time":"total","fight_times":"30","win_rate":"0.4","clear_time":"19.5","occupy_count":"41","kill_rank":"86","heal_rank":"52","damaged_rank":"37","damage_rank":"74","dead_rank":"63","assist_rank":"81"},{"data_time":"30days","fight_times":"10"}]}"""
             path.endsWith("frontline2WeekNew") -> """{"code":10000,"data":[{"part_date":"2026-07-21","fight_times":"2","character_id":"secret"}]}"""
             path.endsWith("fishTotal1") -> """{"code":10000,"data":{"total_times":120,"succ_rate":"84.5","sea_times":"3","max_sea_score":"10321"}}"""
             path.endsWith("getLingShiTotal") -> """{"code":10000,"data":[{"territory_num":"12","enter_num":"48","finish_times":"17","elapsed_time":"920"}]}"""
@@ -201,6 +222,6 @@ private class PersonalDataTransport : RisingStonesHttpClient {
 private const val FishCatalog =
     """{"schemaVersion":1,"content":{"fish":[{"itemId":7678,"iconId":1,"name":"扎尔艾拉","patch":"2.0"}]}}"""
 private const val SavageCatalog =
-    """{"schemaVersion":1,"content":{"series":[{"tiers":[{"raids":[{"instanceId":1226,"name":"轻量级1","imageId":7}]}]}]}}"""
+    """{"schemaVersion":1,"content":{"series":[{"name":"Arcadion","abbreviation":"AAC","tiers":[{"nameEnglish":"Light-heavyweight","nameChinese":"轻量级","achievementOnly":true,"achievementText":"Complete all raids","raids":[{"instanceId":1226,"name":"轻量级1","imageId":7}]}]}]}}"""
 private const val GlamourCatalog =
     """{"schemaVersion":1,"content":{"sets":[{"mirageSetId":1,"name":"Scholar set","iconId":11,"items":[{"slotIndex":1,"itemId":101,"name":"Scholar cap","iconId":21}]},{"mirageSetId":2,"name":"Paladin set","items":[]}],"fashionAccessories":[{"id":3,"iconId":31,"name":"Parasol"}],"stains":[{"stainId":4,"name":"Ruby red","color":16711680,"isMetallic":false},{"stainId":5,"name":"Gold","color":16766720,"isMetallic":true},{"stainId":6,"name":"White","color":16777215,"isMetallic":false}]}}"""

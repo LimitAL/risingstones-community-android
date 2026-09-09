@@ -244,6 +244,8 @@ data class RolePlayRecruitmentSubcomment(
     val replyTargetName: String?,
     val content: String,
     val imageUrls: List<String>,
+    /** Original mask_content markup retained for the iOS-style rich renderer. */
+    val contentHtml: String = "",
 )
 data class RolePlayRecruitmentReview(
     val id: String,
@@ -258,6 +260,8 @@ data class RolePlayRecruitmentReview(
     val imageUrls: List<String>,
     val childCount: Int,
     val childPreviewReplies: List<RolePlayRecruitmentSubcomment> = emptyList(),
+    /** Original mask_content markup retained for the iOS-style rich renderer. */
+    val contentHtml: String = "",
 )
 data class RolePlayRecruitmentReviewPage(val items: List<RolePlayRecruitmentReview>, val page: Int, val hasMore: Boolean)
 data class RolePlayRecruitmentSubcommentPage(val items: List<RolePlayRecruitmentSubcomment>, val page: Int, val hasMore: Boolean)

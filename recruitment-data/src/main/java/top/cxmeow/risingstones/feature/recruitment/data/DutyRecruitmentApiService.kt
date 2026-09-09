@@ -266,18 +266,20 @@ class DutyRecruitmentApiService(
         ).obj("data") ?: throw DutyRecruitmentException.MissingPayload
         val items = data.array("rows").mapNotNull { value ->
             val row = value as? JsonObject ?: return@mapNotNull null
+            val contentHtml = row.text("mask_content") ?: return@mapNotNull null
             RolePlayRecruitmentReview(
                 id = row.text("id") ?: return@mapNotNull null,
                 authorName = row.text("character_name") ?: return@mapNotNull null,
                 avatarUrl = row.text("avatar"),
                 location = location(row.text("area_name"), row.text("group_name")),
-                content = row.text("mask_content")?.plainText() ?: return@mapNotNull null,
+                content = contentHtml.plainText(),
                 score = row.text("score"),
                 likeCount = row.int("like_count") ?: 0,
                 isLiked = row.int("is_like") == 1,
                 createdAt = row.instant("created_at"),
                 imageUrls = row.text("comment_pic").imageUrls(),
                 childCount = row.int("children_count") ?: 0,
+                contentHtml = contentHtml,
             )
         }
         return RolePlayRecruitmentReviewPage(items, page.coerceAtLeast(1), items.size >= normalizedLimit)
@@ -300,13 +302,15 @@ class DutyRecruitmentApiService(
         ).obj("data") ?: throw DutyRecruitmentException.MissingPayload
         val items = data.array("rows").mapNotNull { value ->
             val row = value as? JsonObject ?: return@mapNotNull null
+            val contentHtml = row.text("mask_content") ?: return@mapNotNull null
             RolePlayRecruitmentSubcomment(
                 id = row.text("id") ?: return@mapNotNull null,
                 authorName = row.text("character_name") ?: return@mapNotNull null,
                 avatarUrl = row.text("avatar"),
                 replyTargetName = row.text("to_cname"),
-                content = row.text("mask_content")?.plainText() ?: return@mapNotNull null,
+                content = contentHtml.plainText(),
                 imageUrls = row.text("comment_pic").imageUrls(),
+                contentHtml = contentHtml,
             )
         }
         return RolePlayRecruitmentSubcommentPage(items, page.coerceAtLeast(1), items.size >= normalizedLimit)

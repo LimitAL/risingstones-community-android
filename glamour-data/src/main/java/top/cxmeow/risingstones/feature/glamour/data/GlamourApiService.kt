@@ -41,6 +41,7 @@ import top.cxmeow.risingstones.feature.glamour.domain.GlamourListRequest
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourListSource
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourListingSummary
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourProfileStatistics
+import top.cxmeow.risingstones.feature.glamour.domain.GlamourAuthorProfile
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourRace
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourService
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourSearchSelection
@@ -199,6 +200,50 @@ class GlamourApiService(
         )
     }
 
+    override suspend fun fetchAuthorProfile(authorId: String): GlamourAuthorProfile {
+        val data = perform { headers ->
+            RisingStonesApiRequest(
+                "api/home/userInfo/getUserInfo",
+                query = listOf(q("uuid", authorId), q("tempsuid", temporarySessionId)),
+                headers = headers,
+            )
+        }.objectValue("data") ?: throw GlamourException.MissingPayload
+        val character = data.arrayValue("character_detail", "characterDetail")
+            .firstOrNull() as? JsonObject
+        val followFans = data.objectValue("follow_fansi_num", "followFansiNum")
+        return GlamourAuthorProfile(
+            author = GlamourAuthor(
+                data.stringValue("uuid") ?: authorId,
+                data.stringValue("character_name", "characterName")
+                    ?: character?.stringValue("character_name", "characterName") ?: "—",
+                data.stringValue("area_name", "areaName").orEmpty(),
+                data.stringValue("group_name", "groupName").orEmpty(),
+                data.stringValue("avatar"),
+            ),
+            profile = data.stringValue("profile"),
+            followingCount = followFans?.intValue("follow_num", "followNum") ?: 0,
+            followerCount = followFans?.intValue("fans_num", "fansNum") ?: 0,
+            relation = data.intValue("relation") ?: 0,
+        )
+    }
+
+    override suspend fun followAuthor(authorId: String) {
+        form("api/home/userRelation/follow", listOf("follow_uuid" to authorId))
+    }
+
+    override suspend fun cancelFollowAuthor(authorId: String) {
+        perform { headers ->
+            RisingStonesApiRequest(
+                "api/home/userRelation/cancelFollow",
+                method = RisingStonesHttpMethod.Put,
+                query = listOf(q("tempsuid", temporarySessionId)),
+                headers = headers,
+                body = "{\"follow_uuid\":\"${authorId.replace("\\", "\\\\").replace("\"", "\\\"")}\"}".encodeToByteArray(),
+                contentType = "application/json; charset=utf-8",
+            )
+        }
+    }
+
     override suspend fun fetchRaces(): List<GlamourRace> = perform { headers ->
         RisingStonesApiRequest(
             "api/home/gameData/getAllRace",
@@ -292,6 +337,19 @@ class GlamourApiService(
             data.arrayValue("equipments").mapNotNull(::equipment),
             ornament?.accessory("glasses") ,
             ornament?.accessory("ornament"),
+            (data.intValue("fashion_coupon", "fashionCoupon") ?: 0) == 1,
+            data.stringValue("inviate_code", "inviateCode")
+                ?.trim()
+                ?.takeIf(String::isNotEmpty),
+            (data.intValue("is_receive", "isReceive") ?: user?.intValue("is_receive", "isReceive") ?: 0) == 1,
+            (data.intValue("relation") ?: 0) == 2,
+        )
+    }
+
+    override suspend fun claimCoupon(inviteCode: String, glamourId: Int) {
+        form(
+            "api/home/glamourFashion/claimCoupon",
+            listOf("inviate_code" to inviteCode, "glamour_id" to "$glamourId"),
         )
     }
 
@@ -385,6 +443,7 @@ class GlamourApiService(
             item.intArray("job_ids", "jobIds"),
             item.intArray("race_ids", "raceIds"),
             item.intArray("gender_ids", "genderIds"),
+            (item.intValue("fashion_coupon", "fashionCoupon") ?: 0) == 1,
         )
     }
 

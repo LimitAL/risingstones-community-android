@@ -50,7 +50,7 @@ if ! grep -Fq "noBackupFilesDir" "$cookie_store_source" ||
   echo "The reusable WebView credential store must use atomic no-backup storage" >&2
   exit 1
 fi
-if rg -n 'putString\([[:space:]]*(CookieKey|UserAgentKey)' "$cookie_store_source"; then
+if grep -n -E 'putString\([[:space:]]*(CookieKey|UserAgentKey)' "$cookie_store_source"; then
     echo "WebView credentials must not be persisted in ordinary SharedPreferences" >&2
     exit 1
 fi
@@ -61,23 +61,33 @@ if ! grep -Fq "WindowManager.LayoutParams.FLAG_SECURE" "$login_ui_source"; then
   exit 1
 fi
 
-if rg -n \
+if grep -R -n -E \
+  --include='*.kt' \
   '(^|[^A-Za-z])(Log\.[A-Za-z]+|println|printStackTrace)[[:space:]]*\(' \
   auth-webview/src/main \
-  network/src/main \
-  -g '*.kt'; then
+  network/src/main; then
   echo "Sensitive authentication or network code must not write process logs" >&2
   exit 1
 fi
 
 exported_components="$(
-  rg -n 'android:exported="true"' \
-    --glob 'AndroidManifest.xml' \
-    --glob '!**/build/**' |
+  grep -R -n -F \
+    --include='AndroidManifest.xml' \
+    --exclude-dir=build \
+    'android:exported="true"' \
+    . ||
+    true
+)"
+exported_component_count="$(
+  printf '%s\n' "$exported_components" |
+    sed '/^$/d' |
     wc -l |
     tr -d ' '
 )"
-if [[ "$exported_components" != "1" ]]; then
+if [[ "$exported_component_count" != "1" ]]; then
+  if [[ -n "$exported_components" ]]; then
+    echo "$exported_components"
+  fi
   echo "Expected only the standalone launcher activity to be exported" >&2
   exit 1
 fi

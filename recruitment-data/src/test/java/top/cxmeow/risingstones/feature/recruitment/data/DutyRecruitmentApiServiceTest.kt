@@ -143,7 +143,9 @@ class DutyRecruitmentApiServiceTest {
         assertEquals("2026-07-21", rolePlay.information.first { it.kind.name == "CreatedAt" }.value)
         assertEquals("Maid One", members.single().name)
         assertEquals("Good venue", reviews.items.single().content)
+        assertEquals("<p>Good venue</p>", reviews.items.single().contentHtml)
         assertEquals("Thanks", replies.items.single().content)
+        assertEquals("<p>Thanks</p>", replies.items.single().contentHtml)
         assertEquals(listOf(1, 2, 3, 4, 5), rating.counts)
         assertEquals(1, like)
     }

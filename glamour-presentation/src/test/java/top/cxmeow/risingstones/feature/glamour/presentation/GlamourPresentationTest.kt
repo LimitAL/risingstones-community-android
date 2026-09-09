@@ -12,6 +12,7 @@ import org.junit.Rule
 import org.junit.Test
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourAccessorySearchResult
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourAuthor
+import top.cxmeow.risingstones.feature.glamour.domain.GlamourAuthorProfile
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourDetail
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourEquipmentSearchResult
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourFavoriteFolder
@@ -82,6 +83,15 @@ class GlamourViewModelTest {
         assertEquals("author-9", service.requests.single().authorId)
         assertEquals(20, service.requests.single().limit)
         assertEquals(GlamourProfileStatistics(4, 5, 6), viewModel.state.value.profileStatistics)
+        assertEquals("A profile", viewModel.state.value.authorProfile?.profile)
+        assertEquals(12, viewModel.state.value.authorProfile?.followingCount)
+        assertTrue(viewModel.state.value.authorProfile?.isFollowing == false)
+
+        viewModel.toggleFollow()
+        advanceUntilIdle()
+
+        assertEquals(listOf("author-9"), service.followedAuthors)
+        assertTrue(viewModel.state.value.authorProfile?.isFollowing == true)
 
         viewModel.selectDetail(1)
         advanceUntilIdle()
@@ -160,6 +170,8 @@ private class FakeGlamourService : GlamourService {
     val requests = mutableListOf<GlamourListRequest>()
     val favoritedIds = mutableListOf<Int>()
     val likedIds = mutableListOf<Int>()
+    val followedAuthors = mutableListOf<String>()
+    var isFollowing = false
     var folderFetchCount = 0
     var failLists = false
     var failDetails = false
@@ -186,6 +198,20 @@ private class FakeGlamourService : GlamourService {
     override suspend fun deleteFavoriteFolder(id: Int) = Unit
 
     override suspend fun fetchProfileStatistics(authorId: String?) = GlamourProfileStatistics(4, 5, 6)
+    override suspend fun fetchAuthorProfile(authorId: String) = GlamourAuthorProfile(
+        author = GlamourAuthor(authorId, "Hero", "World", "DC", null),
+        profile = "A profile",
+        followingCount = 12,
+        followerCount = 34,
+        relation = if (isFollowing) 2 else 0,
+    )
+    override suspend fun followAuthor(authorId: String) {
+        followedAuthors += authorId
+        isFollowing = true
+    }
+    override suspend fun cancelFollowAuthor(authorId: String) {
+        isFollowing = false
+    }
     override suspend fun fetchRaces() = listOf(GlamourRace(1, "Hyur"))
     override suspend fun searchEquipment(name: String, page: Int): List<GlamourEquipmentSearchResult> = emptyList()
     override suspend fun searchGlasses(name: String): List<GlamourGlassesSearchGroup> = emptyList()
