@@ -93,11 +93,13 @@ domain、data、presentation、默认 Compose 界面与自适应导航。
 项目版本可以通过 `risingStonesVersion` 设置，独立应用版本可以通过
 `risingStonesAppVersionCode` 和 `risingStonesAppVersionName` 设置。
 
-正式签名只读取 `RISINGSTONES_RELEASE_*` 环境变量。候选发布工作流只生成短期工作流制品，
-不会自动创建 GitHub Release，也不会自动向远端 Maven 仓库发布。
+正式签名只读取 `RISINGSTONES_RELEASE_*` 环境变量。候选发布工作流只生成短期工作流制品；
+正式发布工作流由 `v0.1.0` 一类标签触发，将公共库发布到 GitHub Packages，并把签名 APK、
+AAB 和 SHA-256 清单附加到对应 GitHub Release。发布成功后可通过 GitHub App 向配置的接入方
+仓库发送通用 `dependency-released` 兼容验证事件。
 
-项目源码采用 [MIT 许可证](LICENSE)。首次公开发布前仍需确定维护者公开联系信息和正式
-Maven 托管位置。详见[发布检查清单](docs/release-checklist.md)和
+项目源码采用 [MIT 许可证](LICENSE)。正式 Maven 制品托管在本仓库的 GitHub Packages。
+详见[发布检查清单](docs/release-checklist.md)和
 [依赖许可证清单](docs/dependency-licenses.md)。
 
 应用使用原创的猫爪石印图标，不使用服务运营方的官方标识。名称、图标含义、配色和安全区

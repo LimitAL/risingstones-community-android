@@ -28,8 +28,9 @@ Android 17 Pixel Fold 模拟器已完成独立 Debug APK 冷启动、匿名论�
 - [ ] 启用要求外部 Actions 使用完整提交 SHA 的仓库策略。
 - [x] 确认源码仓库地址为
       `https://github.com/LimitAL/risingstones-community-android`。
-- [ ] 确认 Maven 托管位置、group、artifact 坐标、包名和应用标识。
-- [ ] 补齐发布到 POM 的公开维护者名称和公开联系邮箱。
+- [x] 确认 Maven 托管位置为本仓库 GitHub Packages，并保持
+      `top.cxmeow.risingstones` group 和现有 artifact 坐标。
+- [x] 使用仓库维护者公开的 Git 提交名称和邮箱补齐 POM 开发者信息。
 - [ ] 建立发布签名密钥的保管、备份和恢复流程。
 - [ ] 使用专门测试账号完成 WebView Cookie 真实验证，并只在兼容性矩阵记录脱敏结果。
 - [ ] 配置候选发布工作流需要的签名秘密变量。
@@ -64,8 +65,10 @@ bash scripts/verify-maven-api-consumption.sh
 - [ ] 至少使用一个独立示例工程，分别验证源码组合构建和生成的 Maven 仓库。
 
 手动候选发布工作流会执行相同门禁，签名并校验 APK/AAB，打包全部 Maven 制品并生成
-SHA-256 清单。它不会自动创建 GitHub Release，也不会自动向 Maven 服务器发布。公开仓库的
-工作流制品可能被其他人下载，因此只有在允许分发该候选版本时才能手动运行。
+SHA-256 清单。它不会自动创建 GitHub Release，也不会自动向 Maven 服务器发布。正式发布
+工作流只接受已有 `v0.1.0` 一类标签，在门禁全部通过后发布 GitHub Packages 和 GitHub
+Release；已发布版本不可覆盖。公开仓库的工作流制品可能被其他人下载，因此只有在允许分发
+该候选版本时才能手动运行。
 
 本地验证两种消费路径时，可以使用：
 
@@ -100,10 +103,8 @@ GitHub Actions 还会从 `RISINGSTONES_RELEASE_KEYSTORE_BASE64` 恢复临时密�
 - 完整有效的公共 Maven 元数据。
 - 全部签名变量和存在的绝对密钥库路径。
 
-项目地址、MIT 许可证和 SCM 元数据已经写入 `gradle.properties`。首次正式发布前仍需补充：
-
-- `risingStonesDeveloperName`
-- `risingStonesDeveloperEmail`
+项目地址、MIT 许可证、SCM 元数据、公开维护者名称与邮箱和 GitHub Packages 地址已经写入
+`gradle.properties`。
 
 发布前最后确认：
 
