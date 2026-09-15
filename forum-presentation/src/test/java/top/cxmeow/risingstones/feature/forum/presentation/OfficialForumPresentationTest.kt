@@ -173,6 +173,7 @@ private class FakeOfficialForumService : OfficialForumService {
     val commentQueries = mutableListOf<OfficialForumCommentQuery>()
     var lastCommentDraft: OfficialForumCommentDraft? = null
     var lastVoteDraft: OfficialForumVoteDraft? = null
+    val deletedCommentIds = mutableListOf<Int>()
 
     override suspend fun fetchParts() = listOf(OfficialForumPartFilter(8, "News", 9))
 
@@ -213,6 +214,9 @@ private class FakeOfficialForumService : OfficialForumService {
         lastCommentDraft = draft
         return listOf(10)
     }
+    override suspend fun deleteComment(id: Int) {
+        deletedCommentIds += id
+    }
     override suspend fun submitVote(draft: OfficialForumVoteDraft): OfficialForumVoteResult {
         lastVoteDraft = draft
         return OfficialForumVoteResult(5, mapOf(1 to 1, 2 to 4))
@@ -241,7 +245,7 @@ private val DETAIL = OfficialForumPostDetail(
 private val VOTE = DETAIL.votes.single()
 private val COMMENT = OfficialForumComment(
     9, AUTHOR, null, "Root", emptyList(), emptyList(), NOW, null, 2, 4,
-    isPostAuthor = true,
+    isPostAuthor = true, isMine = true,
 )
 private val CHILDREN = (1..4).map { index ->
     COMMENT.copy(id = 90 + index, bodyText = "Child $index", childCount = 0, isPostAuthor = false)

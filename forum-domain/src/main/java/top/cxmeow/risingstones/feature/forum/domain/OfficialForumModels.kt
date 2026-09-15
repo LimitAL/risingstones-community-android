@@ -171,6 +171,7 @@ data class OfficialForumComment(
     val childCount: Int,
     val childPreviewComments: List<OfficialForumComment> = emptyList(),
     val isPostAuthor: Boolean,
+    val isMine: Boolean,
 )
 
 data class OfficialForumCommentDraft(
@@ -233,6 +234,7 @@ interface OfficialForumService {
     suspend fun uploadCommentImage(image: OfficialForumCommentImageUpload): String =
         throw OfficialForumException.ImageUploadFailed
     suspend fun submitComment(draft: OfficialForumCommentDraft): List<Int>
+    suspend fun deleteComment(id: Int)
     suspend fun submitVote(draft: OfficialForumVoteDraft): OfficialForumVoteResult
 }
 

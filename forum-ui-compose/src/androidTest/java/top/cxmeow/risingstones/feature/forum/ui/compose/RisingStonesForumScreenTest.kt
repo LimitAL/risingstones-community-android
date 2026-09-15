@@ -139,6 +139,8 @@ private object FakeOfficialForumService : OfficialForumService {
 
     override suspend fun submitComment(draft: OfficialForumCommentDraft) = error("unused")
 
+    override suspend fun deleteComment(id: Int) = error("unused")
+
     override suspend fun submitVote(draft: OfficialForumVoteDraft): OfficialForumVoteResult =
         error("unused")
 }

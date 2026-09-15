@@ -41,4 +41,8 @@
     <string name="forum_collapse">收合</string>
     <string name="forum_no_content">此主題暫無可閱讀正文。</string>
     <string name="forum_anonymous_notice">無需登入即可閱讀論壇。Cookie 單獨驗證完成目前線上驗證前，帳號寫入操作維持關閉。</string>
+    <string name="forum_delete">刪除</string>
+    <string name="forum_delete_confirm_title">刪除回覆</string>
+    <string name="forum_delete_confirm_message">刪除後將無法復原，確定要刪除這則回覆嗎？</string>
+    <string name="forum_cancel">取消</string>
 </resources>

@@ -133,6 +133,7 @@ class OfficialForumApiServiceTest {
         assertEquals("earliest", transport.requests[2].url.toHttpUrl().queryParameter("order"))
         assertEquals("Reply", comments.items.single().bodyText)
         assertEquals(3, comments.items.single().childCount)
+        assertTrue(comments.items.single().isMine)
         assertEquals(1, children.items.size)
     }
 
@@ -180,6 +181,24 @@ class OfficialForumApiServiceTest {
         assertTrue(transport.requests[3].form().getValue("options").contains("option_id"))
         assertEquals(7, vote.voteTotalUser)
         assertEquals(5, vote.voteDetails[2])
+    }
+
+    @Test
+    fun deleteCommentSendsJsonBodyOverDeleteWithCredential() = runBlocking {
+        val unauthenticated = service(OfficialForumTransport())
+        assertThrows(OfficialForumException.AuthenticationRequired::class.java) {
+            runBlocking { unauthenticated.deleteComment(2139818) }
+        }
+
+        val transport = OfficialForumTransport()
+        val service = service(transport, TestCredentialProvider)
+        service.deleteComment(2139818)
+
+        val request = transport.requests.single()
+        assertEquals(RisingStonesHttpMethod.Delete, request.method)
+        assertEquals("host token", request.headers["Authorization"])
+        assertEquals("application/json; charset=utf-8", request.contentType)
+        assertEquals("{\"comment_id\":\"2139818\"}", requireNotNull(request.body).decodeToString())
     }
 
     @Test
@@ -339,6 +358,7 @@ private class OfficialForumTransport(
             path.endsWith("/like") -> """{"code":10000,"data":1}"""
             path.endsWith("/star") -> """{"code":10000,"data":-1}"""
             path.endsWith("/comment") -> """{"code":10000,"data":[91]}"""
+            path.endsWith("/deleteComment") -> """{"code":10000,"msg":"操作成功","data":null}"""
             path.endsWith("/vote") -> """{"code":10000,"data":{"vote_total_user":"7","vote_details":[{"option_id":"2","total_vote_num":5}]}}"""
             else -> error("Unexpected request ${request.method} ${request.url}")
         }
@@ -422,6 +442,7 @@ private val COMMENTS = """
       "id":"9","children_count":"3","mask_content":"<p>Reply</p>",
       "comment_pic":"https://cdn.test/reply.jpg","uuid":"commenter",
       "character_name":"Commenter","area_name":"World","group_name":"DC",
-      "created_at":"2026-07-21 14:00:00","like_count":"2","is_posts_author":"1"
+      "created_at":"2026-07-21 14:00:00","like_count":"2","is_posts_author":"1",
+      "is_mine":"1"
     }]}}
 """.trimIndent()

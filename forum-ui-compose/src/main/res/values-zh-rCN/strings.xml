@@ -41,4 +41,8 @@
     <string name="forum_collapse">收起</string>
     <string name="forum_no_content">该主题暂无可阅读正文。</string>
     <string name="forum_anonymous_notice">无需登录即可阅读论坛。Cookie 单独认证完成当前线上验证前，账号写入操作保持关闭。</string>
+    <string name="forum_delete">删除</string>
+    <string name="forum_delete_confirm_title">删除回复</string>
+    <string name="forum_delete_confirm_message">删除后将无法恢复，确定要删除这条回复吗？</string>
+    <string name="forum_cancel">取消</string>
 </resources>

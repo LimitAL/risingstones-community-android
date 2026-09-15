@@ -250,6 +250,13 @@ class OfficialForumApiService(
             ),
         ).verified().data.orEmpty()
 
+    override suspend fun deleteComment(id: Int) {
+        jsonDelete<MutationResponse>(
+            path = "api/home/posts/deleteComment",
+            body = "{\"comment_id\":\"$id\"}".encodeToByteArray(),
+        ).verified()
+    }
+
     override suspend fun submitVote(draft: OfficialForumVoteDraft): OfficialForumVoteResult {
         val options = draft.options.map { VoteSubmitOption(it.title, it.optionId) }
         val response = formPost<VoteSubmitResponse>(
@@ -412,6 +419,94 @@ class OfficialForumApiService(
         headers = headers,
         body = body,
         contentType = "application/x-www-form-urlencoded; charset=utf-8",
+    )
+
+    private suspend inline fun <reified T : ApiResponse> jsonDelete(
+        path: String,
+        body: ByteArray,
+    ): T {
+        val provider = sessionProvider
+            ?: throw OfficialForumException.AuthenticationRequired
+        if (RisingStonesCapability.ForumWrite !in provider.capabilities) {
+            throw OfficialForumException.AuthenticationRequired
+        }
+        val initialHeaders = provider.currentAuthorizer()
+            .headers(
+                path = path,
+                requirement = RisingStonesAuthenticationRequirement.Required,
+                capability = RisingStonesCapability.ForumWrite,
+            )
+            .takeIf(Map<String, String>::isNotEmpty)
+            ?: throw OfficialForumException.AuthenticationRequired
+        val response = try {
+            client.execute(jsonDeleteRequest(path, body, initialHeaders))
+        } catch (error: Exception) {
+            if (error.isHttpIdentityConflict()) {
+                val reclaimed = identityConflictHandler?.awaitIdentityConflictResolution()
+                    .headers(
+                        path,
+                        RisingStonesAuthenticationRequirement.Required,
+                        RisingStonesCapability.ForumWrite,
+                    )
+                    .takeIf(Map<String, String>::isNotEmpty)
+                    ?: throw error
+                return json.decodeFromString(
+                    client.execute(jsonDeleteRequest(path, body, reclaimed)).body.decodeToString(),
+                )
+            }
+            if (!error.isHttpAuthenticationFailure()) throw error
+            val refreshed = provider.refreshAuthorizer()
+                .headers(
+                    path,
+                    RisingStonesAuthenticationRequirement.Required,
+                    RisingStonesCapability.ForumWrite,
+                )
+                .takeIf(Map<String, String>::isNotEmpty)
+                ?: throw error
+            client.execute(jsonDeleteRequest(path, body, refreshed))
+        }
+        var decoded = json.decodeFromString<T>(response.body.decodeToString())
+        if (decoded.isIdentityConflict()) {
+            identityConflictHandler?.awaitIdentityConflictResolution()
+                .headers(
+                    path,
+                    RisingStonesAuthenticationRequirement.Required,
+                    RisingStonesCapability.ForumWrite,
+                )
+                .takeIf(Map<String, String>::isNotEmpty)
+                ?.let { reclaimed ->
+                decoded = json.decodeFromString(
+                    client.execute(jsonDeleteRequest(path, body, reclaimed)).body.decodeToString(),
+                )
+            }
+        } else if (decoded.isAuthenticationFailure()) {
+            provider.refreshAuthorizer()
+                .headers(
+                    path,
+                    RisingStonesAuthenticationRequirement.Required,
+                    RisingStonesCapability.ForumWrite,
+                )
+                .takeIf(Map<String, String>::isNotEmpty)
+                ?.let { refreshed ->
+                decoded = json.decodeFromString(
+                    client.execute(jsonDeleteRequest(path, body, refreshed)).body.decodeToString(),
+                )
+            }
+        }
+        return decoded
+    }
+
+    private fun jsonDeleteRequest(
+        path: String,
+        body: ByteArray,
+        headers: Map<String, String>,
+    ) = RisingStonesApiRequest(
+        path = path,
+        method = RisingStonesHttpMethod.Delete,
+        query = listOf(query("tempsuid", temporarySessionId)),
+        headers = headers,
+        body = body,
+        contentType = "application/json; charset=utf-8",
     )
 
     private fun <T : ApiResponse> T.verified(): T {
@@ -887,6 +982,7 @@ private data class CommentDto(
     @SerialName("admin_tag") val adminTag: JsonElement = JsonNull,
     @SerialName("is_posts_author") val isPostsAuthor: JsonElement = JsonNull,
     @SerialName("to_cname") val toCharacterName: String? = null,
+    @SerialName("is_mine") val isMine: JsonElement = JsonNull,
 ) {
     fun domain(): OfficialForumComment? {
         val content = maskContent.orEmpty()
@@ -907,6 +1003,7 @@ private data class CommentDto(
             likeCount = likeCount.intValue ?: 0,
             childCount = childrenCount.intValue ?: 0,
             isPostAuthor = isPostsAuthor.intValue == 1,
+            isMine = isMine.intValue == 1,
         )
     }
 }

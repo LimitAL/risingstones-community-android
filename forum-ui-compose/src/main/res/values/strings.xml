@@ -41,4 +41,8 @@
     <string name="forum_collapse">Collapse</string>
     <string name="forum_no_content">This topic has no readable content.</string>
     <string name="forum_anonymous_notice">Forum reading works without signing in. Account actions remain disabled until Cookie-only compatibility is verified.</string>
+    <string name="forum_delete">Delete</string>
+    <string name="forum_delete_confirm_title">Delete Reply</string>
+    <string name="forum_delete_confirm_message">This can\'t be undone. Delete this reply?</string>
+    <string name="forum_cancel">Cancel</string>
 </resources>

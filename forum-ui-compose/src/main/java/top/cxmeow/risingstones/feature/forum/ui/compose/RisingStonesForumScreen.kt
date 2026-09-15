@@ -30,6 +30,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -499,6 +500,7 @@ private fun ForumDetailPane(
         },
     )
     val state by detailViewModel.state.collectAsStateWithLifecycle()
+    var pendingDeletion by remember { mutableStateOf<OfficialForumComment?>(null) }
 
     Box(modifier) {
         when {
@@ -521,6 +523,7 @@ private fun ForumDetailPane(
                     showBack = showBack,
                     onBack = onBack,
                     onOpenPost = onOpenPost,
+                    onDeleteRequested = { pendingDeletion = it },
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -535,8 +538,30 @@ private fun ForumDetailPane(
                 replies = state.subCommentsByRootId[rootId].orEmpty(),
                 isLoading = rootId in state.loadingSubCommentIds,
                 onClose = detailViewModel::dismissSubComments,
+                onDeleteRequested = { pendingDeletion = it },
             )
         }
+    }
+
+    pendingDeletion?.let { comment ->
+        AlertDialog(
+            onDismissRequest = { pendingDeletion = null },
+            title = { Text(stringResource(R.string.forum_delete_confirm_title)) },
+            text = { Text(stringResource(R.string.forum_delete_confirm_message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    detailViewModel.deleteComment(comment)
+                    pendingDeletion = null
+                }) {
+                    Text(stringResource(R.string.forum_delete))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeletion = null }) {
+                    Text(stringResource(R.string.forum_cancel))
+                }
+            },
+        )
     }
 }
 
@@ -547,6 +572,7 @@ private fun ForumDetailContent(
     showBack: Boolean,
     onBack: () -> Unit,
     onOpenPost: (Int) -> Unit,
+    onDeleteRequested: (OfficialForumComment) -> Unit,
     modifier: Modifier,
 ) {
     val detail = state.detail ?: return
@@ -609,6 +635,7 @@ private fun ForumDetailContent(
                         comment = comment,
                         previews = state.subCommentsByRootId[comment.id].orEmpty(),
                         onOpenReplies = { viewModel.openSubComments(comment) },
+                        onDelete = onDeleteRequested,
                     )
                 }
             }
@@ -988,6 +1015,7 @@ private fun ForumCommentCard(
     comment: OfficialForumComment,
     previews: List<OfficialForumComment>,
     onOpenReplies: () -> Unit,
+    onDelete: (OfficialForumComment) -> Unit = {},
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
@@ -1018,6 +1046,11 @@ private fun ForumCommentCard(
                 }
                 if (comment.isPostAuthor) {
                     ForumBadge(stringResource(R.string.forum_only_author))
+                }
+                if (comment.isMine) {
+                    TextButton(onClick = { onDelete(comment) }) {
+                        Text(stringResource(R.string.forum_delete))
+                    }
                 }
             }
             if (comment.replyToAuthorName != null) {
@@ -1058,6 +1091,7 @@ private fun ForumRepliesSheet(
     replies: List<OfficialForumComment>,
     isLoading: Boolean,
     onClose: () -> Unit,
+    onDeleteRequested: (OfficialForumComment) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -1080,14 +1114,22 @@ private fun ForumRepliesSheet(
             }
         }
         root?.let {
-            Text(
-                text = "${it.author.characterName}: ${it.bodyText}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(bottom = 8.dp),
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "${it.author.characterName}: ${it.bodyText}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (it.isMine) {
+                    TextButton(onClick = { onDeleteRequested(it) }) {
+                        Text(stringResource(R.string.forum_delete))
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
         }
         when {
             isLoading && replies.isEmpty() -> ForumLoading(Modifier.fillMaxWidth().height(100.dp))
@@ -1105,6 +1147,7 @@ private fun ForumRepliesSheet(
                         comment = reply,
                         previews = emptyList(),
                         onOpenReplies = {},
+                        onDelete = onDeleteRequested,
                     )
                 }
             }

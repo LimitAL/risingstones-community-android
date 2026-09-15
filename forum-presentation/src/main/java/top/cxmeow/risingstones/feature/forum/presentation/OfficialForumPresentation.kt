@@ -264,6 +264,7 @@ data class OfficialForumDetailUiState(
     val isStarringPost: Boolean = false,
     val isSubmittingComment: Boolean = false,
     val submittingVoteIds: Set<String> = emptySet(),
+    val deletingCommentIds: Set<Int> = emptySet(),
     val actionFailed: Boolean = false,
 )
 
@@ -473,6 +474,26 @@ class OfficialForumDetailViewModel(
         }
     }
 
+    fun deleteComment(comment: OfficialForumComment) {
+        val id = comment.id
+        if (id in mutableState.value.deletingCommentIds) return
+        mutableState.update {
+            it.copy(deletingCommentIds = it.deletingCommentIds + id, actionFailed = false)
+        }
+        viewModelScope.launch {
+            try {
+                service.deleteComment(id)
+                mutableState.update { current -> current.removingComment(id) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                mutableState.update {
+                    it.copy(deletingCommentIds = it.deletingCommentIds - id, actionFailed = true)
+                }
+            }
+        }
+    }
+
     fun submitVote(vote: OfficialForumPostVote, optionIds: Set<Int>) {
         if (vote.id in mutableState.value.submittingVoteIds) return
         val selected = vote.options.filter { it.optionId in optionIds }
@@ -611,6 +632,37 @@ class OfficialForumDetailViewModel(
         const val PreviewSize = 3
         const val MaxSubCommentsLoaded = 199
     }
+}
+
+private fun OfficialForumDetailUiState.removingComment(id: Int): OfficialForumDetailUiState {
+    val wasTopLevel = comments.any { it.id == id }
+    val trimmedComments = if (wasTopLevel) comments.filterNot { it.id == id } else comments
+    val trimmedSubComments = subCommentsByRootId.mapValues { (_, items) ->
+        items.filterNot { it.id == id }
+    }
+    val updatedComments = if (wasTopLevel) trimmedComments else trimmedComments.map { comment ->
+        val removedFromThisRoot = subCommentsByRootId[comment.id]?.any { it.id == id } == true
+        if (removedFromThisRoot) comment.copy(childCount = (comment.childCount - 1).coerceAtLeast(0))
+        else comment
+    }
+    val updatedTotals = if (wasTopLevel) {
+        subCommentTotals - id
+    } else {
+        subCommentTotals.mapValues { (rootId, total) ->
+            val removedFromThisRoot = subCommentsByRootId[rootId]?.any { it.id == id } == true
+            if (removedFromThisRoot) (total - 1).coerceAtLeast(0) else total
+        }
+    }
+    return copy(
+        comments = updatedComments,
+        commentTotal = if (wasTopLevel) (commentTotal - 1).coerceAtLeast(0) else commentTotal,
+        subCommentsByRootId = if (wasTopLevel) trimmedSubComments - id else trimmedSubComments,
+        subCommentTotals = updatedTotals,
+        selectedSubCommentRootId =
+            if (wasTopLevel && selectedSubCommentRootId == id) null else selectedSubCommentRootId,
+        detail = detail?.copy(commentCount = (detail.commentCount - 1).coerceAtLeast(0)),
+        deletingCommentIds = deletingCommentIds - id,
+    )
 }
 
 private fun OfficialForumPostDetail.applyingLike(value: Int): OfficialForumPostDetail = when {
