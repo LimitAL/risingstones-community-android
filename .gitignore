@@ -21,3 +21,5 @@ google-services.json
 
 # 仅供本地 AI 开发工具读取，不进入公开仓库
 AGENTS.md
+
+.DS_Store
