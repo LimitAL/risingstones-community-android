@@ -35,11 +35,14 @@ object OfficialForumLinkParser {
             if (name == "id") value.toIntOrNull()?.takeIf { it > 0 } else null
         }
 
+    // PC routes use `.../post/detail/<id>`; the mobile web client uses `.../tiedes/<id>`.
+    private val routeIdSegments = setOf("detail", "tiedes")
+
     private fun routeId(route: String?): Int? {
         val parts = route.orEmpty().split('/').filter(String::isNotBlank)
-        val detailIndex = parts.indexOf("detail")
-        if (detailIndex < 0) return null
-        return parts.getOrNull(detailIndex + 1)?.toIntOrNull()?.takeIf { it > 0 }
+        val markerIndex = parts.indexOfFirst { it in routeIdSegments }
+        if (markerIndex < 0) return null
+        return parts.getOrNull(markerIndex + 1)?.toIntOrNull()?.takeIf { it > 0 }
     }
 
     private fun decode(value: String): String? = runCatching {

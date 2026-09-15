@@ -31,6 +31,12 @@ class OfficialForumLinksTest {
                 "https://ff14risingstones.web.sdo.com/#/post?id=45",
             ),
         )
+        assertEquals(
+            131913,
+            OfficialForumLinkParser.postId(
+                "https://ff14risingstones.web.sdo.com/mob/index.html#/tiedes/131913",
+            ),
+        )
     }
 
     @Test
