@@ -168,6 +168,7 @@ data class OfficialForumComment(
     val createdAt: Instant?,
     val ipLocation: String?,
     val likeCount: Int,
+    val isLiked: Boolean,
     val childCount: Int,
     val childPreviewComments: List<OfficialForumComment> = emptyList(),
     val isPostAuthor: Boolean,
@@ -230,6 +231,7 @@ interface OfficialForumService {
         query: OfficialForumSubCommentQuery,
     ): OfficialForumPage<OfficialForumComment>
     suspend fun likePost(id: Int): Int
+    suspend fun likeComment(id: Int): Int
     suspend fun starPost(id: Int): Int
     suspend fun uploadCommentImage(image: OfficialForumCommentImageUpload): String =
         throw OfficialForumException.ImageUploadFailed

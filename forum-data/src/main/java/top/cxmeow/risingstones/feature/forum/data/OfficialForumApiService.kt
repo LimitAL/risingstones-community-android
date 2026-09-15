@@ -181,9 +181,13 @@ class OfficialForumApiService(
         return response.data.page(page, limit)
     }
 
-    override suspend fun likePost(id: Int): Int = formPost<MutationResponse>(
+    override suspend fun likePost(id: Int): Int = performLike(id, targetType = "1")
+
+    override suspend fun likeComment(id: Int): Int = performLike(id, targetType = "2")
+
+    private suspend fun performLike(id: Int, targetType: String): Int = formPost<MutationResponse>(
         path = "api/home/posts/like",
-        fields = listOf("id" to id.toString(), "type" to "1", "tempsuid" to temporarySessionId),
+        fields = listOf("id" to id.toString(), "type" to targetType, "tempsuid" to temporarySessionId),
     ).verified().data.intValue ?: 0
 
     override suspend fun starPost(id: Int): Int = formPost<MutationResponse>(
@@ -983,6 +987,7 @@ private data class CommentDto(
     @SerialName("is_posts_author") val isPostsAuthor: JsonElement = JsonNull,
     @SerialName("to_cname") val toCharacterName: String? = null,
     @SerialName("is_mine") val isMine: JsonElement = JsonNull,
+    @SerialName("is_like") val isLike: JsonElement = JsonNull,
 ) {
     fun domain(): OfficialForumComment? {
         val content = maskContent.orEmpty()
@@ -1001,6 +1006,7 @@ private data class CommentDto(
             createdAt = createdAt.risingStonesInstant(),
             ipLocation = ipLocation,
             likeCount = likeCount.intValue ?: 0,
+            isLiked = isLike.intValue == 1,
             childCount = childrenCount.intValue ?: 0,
             isPostAuthor = isPostsAuthor.intValue == 1,
             isMine = isMine.intValue == 1,

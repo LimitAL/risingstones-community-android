@@ -539,6 +539,8 @@ private fun ForumDetailPane(
                 isLoading = rootId in state.loadingSubCommentIds,
                 onClose = detailViewModel::dismissSubComments,
                 onDeleteRequested = { pendingDeletion = it },
+                onLike = detailViewModel::likeComment,
+                likingCommentIds = state.likingCommentIds,
             )
         }
     }
@@ -636,6 +638,8 @@ private fun ForumDetailContent(
                         previews = state.subCommentsByRootId[comment.id].orEmpty(),
                         onOpenReplies = { viewModel.openSubComments(comment) },
                         onDelete = onDeleteRequested,
+                        onLike = viewModel::likeComment,
+                        isLiking = comment.id in state.likingCommentIds,
                     )
                 }
             }
@@ -1016,6 +1020,8 @@ private fun ForumCommentCard(
     previews: List<OfficialForumComment>,
     onOpenReplies: () -> Unit,
     onDelete: (OfficialForumComment) -> Unit = {},
+    onLike: (OfficialForumComment) -> Unit = {},
+    isLiking: Boolean = false,
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
@@ -1046,6 +1052,16 @@ private fun ForumCommentCard(
                 }
                 if (comment.isPostAuthor) {
                     ForumBadge(stringResource(R.string.forum_only_author))
+                }
+                TextButton(onClick = { onLike(comment) }, enabled = !isLiking) {
+                    Text(
+                        text = stringResource(R.string.forum_like_count, comment.likeCount),
+                        color = if (comment.isLiked) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            Color.Unspecified
+                        },
+                    )
                 }
                 if (comment.isMine) {
                     TextButton(onClick = { onDelete(comment) }) {
@@ -1092,6 +1108,8 @@ private fun ForumRepliesSheet(
     isLoading: Boolean,
     onClose: () -> Unit,
     onDeleteRequested: (OfficialForumComment) -> Unit,
+    onLike: (OfficialForumComment) -> Unit,
+    likingCommentIds: Set<Int>,
 ) {
     Column(
         modifier = Modifier
@@ -1123,6 +1141,15 @@ private fun ForumRepliesSheet(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+                TextButton(
+                    onClick = { onLike(it) },
+                    enabled = it.id !in likingCommentIds,
+                ) {
+                    Text(
+                        text = stringResource(R.string.forum_like_count, it.likeCount),
+                        color = if (it.isLiked) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                    )
+                }
                 if (it.isMine) {
                     TextButton(onClick = { onDeleteRequested(it) }) {
                         Text(stringResource(R.string.forum_delete))
@@ -1148,6 +1175,8 @@ private fun ForumRepliesSheet(
                         previews = emptyList(),
                         onOpenReplies = {},
                         onDelete = onDeleteRequested,
+                        onLike = onLike,
+                        isLiking = reply.id in likingCommentIds,
                     )
                 }
             }

@@ -134,6 +134,7 @@ class OfficialForumApiServiceTest {
         assertEquals("Reply", comments.items.single().bodyText)
         assertEquals(3, comments.items.single().childCount)
         assertTrue(comments.items.single().isMine)
+        assertTrue(comments.items.single().isLiked)
         assertEquals(1, children.items.size)
     }
 
@@ -181,6 +182,18 @@ class OfficialForumApiServiceTest {
         assertTrue(transport.requests[3].form().getValue("options").contains("option_id"))
         assertEquals(7, vote.voteTotalUser)
         assertEquals(5, vote.voteDetails[2])
+    }
+
+    @Test
+    fun likeCommentReusesLikeEndpointWithCommentTargetType() = runBlocking {
+        val transport = OfficialForumTransport()
+        val service = service(transport, TestCredentialProvider)
+
+        assertEquals(1, service.likeComment(2064233))
+
+        val request = transport.requests.single()
+        assertEquals("2064233", request.form()["id"])
+        assertEquals("2", request.form()["type"])
     }
 
     @Test
@@ -443,6 +456,6 @@ private val COMMENTS = """
       "comment_pic":"https://cdn.test/reply.jpg","uuid":"commenter",
       "character_name":"Commenter","area_name":"World","group_name":"DC",
       "created_at":"2026-07-21 14:00:00","like_count":"2","is_posts_author":"1",
-      "is_mine":"1"
+      "is_mine":"1","is_like":"1"
     }]}}
 """.trimIndent()

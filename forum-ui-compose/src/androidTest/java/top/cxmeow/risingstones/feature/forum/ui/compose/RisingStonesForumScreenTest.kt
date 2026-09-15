@@ -133,6 +133,8 @@ private object FakeOfficialForumService : OfficialForumService {
 
     override suspend fun likePost(id: Int) = 0
 
+    override suspend fun likeComment(id: Int) = error("unused")
+
     override suspend fun starPost(id: Int) = 0
 
     override suspend fun uploadCommentImage(image: OfficialForumCommentImageUpload) = error("unused")

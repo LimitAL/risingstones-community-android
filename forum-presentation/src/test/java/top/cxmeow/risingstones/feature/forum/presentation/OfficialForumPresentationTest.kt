@@ -162,6 +162,32 @@ class OfficialForumViewModelsTest {
         assertTrue(vote.options.single { it.optionId == 2 }.isParticipant)
         assertEquals(4, vote.options.single { it.optionId == 2 }.totalVoteCount)
     }
+
+    @Test
+    fun likingCommentUpdatesTopLevelAndNestedCopiesWithoutDuplicateRequests() = runTest {
+        val service = FakeOfficialForumService()
+        val viewModel = OfficialForumDetailViewModel(service, 42)
+        advanceUntilIdle()
+
+        val rootComment = viewModel.state.value.comments.single { it.id == 9 }
+        viewModel.likeComment(rootComment)
+        viewModel.likeComment(rootComment)
+        advanceUntilIdle()
+
+        assertEquals(listOf(9), service.likedCommentIds)
+        val likedRoot = viewModel.state.value.comments.single { it.id == 9 }
+        assertTrue(likedRoot.isLiked)
+        assertEquals(rootComment.likeCount + 1, likedRoot.likeCount)
+
+        val nestedReply = viewModel.state.value.subCommentsByRootId.getValue(9).single { it.id == 91 }
+        viewModel.likeComment(nestedReply)
+        advanceUntilIdle()
+
+        val likedNested =
+            viewModel.state.value.subCommentsByRootId.getValue(9).single { it.id == 91 }
+        assertTrue(likedNested.isLiked)
+        assertEquals(nestedReply.likeCount + 1, likedNested.likeCount)
+    }
 }
 
 private class FakeOfficialForumService : OfficialForumService {
@@ -209,6 +235,11 @@ private class FakeOfficialForumService : OfficialForumService {
     }
 
     override suspend fun likePost(id: Int) = 1
+    val likedCommentIds = mutableListOf<Int>()
+    override suspend fun likeComment(id: Int): Int {
+        likedCommentIds += id
+        return 1
+    }
     override suspend fun starPost(id: Int) = -1
     override suspend fun submitComment(draft: OfficialForumCommentDraft): List<Int> {
         lastCommentDraft = draft
@@ -244,8 +275,8 @@ private val DETAIL = OfficialForumPostDetail(
 )
 private val VOTE = DETAIL.votes.single()
 private val COMMENT = OfficialForumComment(
-    9, AUTHOR, null, "Root", emptyList(), emptyList(), NOW, null, 2, 4,
-    isPostAuthor = true, isMine = true,
+    9, AUTHOR, null, "Root", emptyList(), emptyList(), NOW, null, 2,
+    isLiked = false, childCount = 4, isPostAuthor = true, isMine = true,
 )
 private val CHILDREN = (1..4).map { index ->
     COMMENT.copy(id = 90 + index, bodyText = "Child $index", childCount = 0, isPostAuthor = false)

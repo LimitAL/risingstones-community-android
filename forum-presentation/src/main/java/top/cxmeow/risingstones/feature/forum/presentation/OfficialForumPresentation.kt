@@ -265,6 +265,7 @@ data class OfficialForumDetailUiState(
     val isSubmittingComment: Boolean = false,
     val submittingVoteIds: Set<String> = emptySet(),
     val deletingCommentIds: Set<Int> = emptySet(),
+    val likingCommentIds: Set<Int> = emptySet(),
     val actionFailed: Boolean = false,
 )
 
@@ -494,6 +495,26 @@ class OfficialForumDetailViewModel(
         }
     }
 
+    fun likeComment(comment: OfficialForumComment) {
+        val id = comment.id
+        if (id in mutableState.value.likingCommentIds) return
+        mutableState.update {
+            it.copy(likingCommentIds = it.likingCommentIds + id, actionFailed = false)
+        }
+        viewModelScope.launch {
+            try {
+                val value = service.likeComment(id)
+                mutableState.update { current -> current.applyingCommentLike(id, value) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                mutableState.update {
+                    it.copy(likingCommentIds = it.likingCommentIds - id, actionFailed = true)
+                }
+            }
+        }
+    }
+
     fun submitVote(vote: OfficialForumPostVote, optionIds: Set<Int>) {
         if (vote.id in mutableState.value.submittingVoteIds) return
         val selected = vote.options.filter { it.optionId in optionIds }
@@ -663,6 +684,23 @@ private fun OfficialForumDetailUiState.removingComment(id: Int): OfficialForumDe
         detail = detail?.copy(commentCount = (detail.commentCount - 1).coerceAtLeast(0)),
         deletingCommentIds = deletingCommentIds - id,
     )
+}
+
+private fun OfficialForumDetailUiState.applyingCommentLike(
+    id: Int,
+    value: Int,
+): OfficialForumDetailUiState = copy(
+    comments = comments.map { if (it.id == id) it.applyingLike(value) else it },
+    subCommentsByRootId = subCommentsByRootId.mapValues { (_, items) ->
+        items.map { if (it.id == id) it.applyingLike(value) else it }
+    },
+    likingCommentIds = likingCommentIds - id,
+)
+
+private fun OfficialForumComment.applyingLike(value: Int): OfficialForumComment = when {
+    value > 0 && !isLiked -> copy(likeCount = likeCount + 1, isLiked = true)
+    value < 0 && isLiked -> copy(likeCount = (likeCount - 1).coerceAtLeast(0), isLiked = false)
+    else -> this
 }
 
 private fun OfficialForumPostDetail.applyingLike(value: Int): OfficialForumPostDetail = when {
