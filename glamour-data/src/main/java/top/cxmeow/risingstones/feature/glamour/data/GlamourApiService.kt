@@ -81,7 +81,10 @@ class GlamourApiService(
             request.listing.search == null && request.listing.filter == top.cxmeow.risingstones.feature.glamour.domain.GlamourFilter() &&
             request.listing.authorId.isNullOrBlank() &&
             request.tagIds.isEmpty() && request.tribeId == null)
-        if (request.tagIds.isNotEmpty() || request.tribeId != null) require(request.listing.source == GlamourListSource.Community && request.listing.search == null)
+        if (request.tagIds.isNotEmpty()) require(request.listing.search == null)
+        if (request.tribeId != null) require(
+            request.listing.source == GlamourListSource.Community && request.listing.search == null,
+        )
         return listPage(request.listing, request)
     }
 
@@ -430,8 +433,31 @@ class GlamourApiService(
                 ?.takeIf(String::isNotEmpty),
             (data.intValue("is_receive", "isReceive") ?: user?.intValue("is_receive", "isReceive") ?: 0) == 1,
             (data.intValue("relation") ?: 0) in 2..3,
+            detailTags(data),
         )
     }
+
+    private fun detailTags(data: JsonObject): List<top.cxmeow.risingstones.feature.glamour.domain.GlamourDetailTag> =
+        data.arrayValue("tags").mapNotNull { value ->
+            val tag = value as? JsonObject ?: return@mapNotNull null
+            val id = tag.intValue("tag_id", "tagId") ?: return@mapNotNull null
+            val custom = (tag.intValue("is_custom", "isCustom") ?: 0) != 0
+            val name = (if (custom) {
+                tag.stringValue("custom_name", "customName")
+            } else {
+                tag.stringValue("tag_name", "tagName")
+            })?.trim()?.takeIf(String::isNotEmpty) ?: return@mapNotNull null
+            top.cxmeow.risingstones.feature.glamour.domain.GlamourDetailTag(
+                id = id,
+                name = name,
+                isCustom = custom,
+                categoryId = tag.intValue("category_id", "categoryId"),
+                categoryName = tag.stringValue("category_name", "categoryName")
+                    ?.trim()?.takeIf(String::isNotEmpty),
+                categorySort = tag.intValue("category_sort", "categorySort") ?: Int.MAX_VALUE,
+                tagSort = tag.intValue("tag_sort", "tagSort") ?: Int.MAX_VALUE,
+            )
+        }.sortedWith(compareBy({ it.categorySort }, { it.tagSort }, { it.id }))
 
     override suspend fun claimCoupon(inviteCode: String, glamourId: Int) {
         form(

@@ -124,6 +124,17 @@ data class GlamourDetail(
     val couponInviteCode: String? = null,
     val isCouponClaimed: Boolean = false,
     val isFollowingAuthor: Boolean = false,
+    val tags: List<GlamourDetailTag> = emptyList(),
+)
+
+data class GlamourDetailTag(
+    val id: Int,
+    val name: String,
+    val isCustom: Boolean,
+    val categoryId: Int?,
+    val categoryName: String?,
+    val categorySort: Int = Int.MAX_VALUE,
+    val tagSort: Int = Int.MAX_VALUE,
 )
 
 data class GlamourAccessory(val id: Int, val name: String, val iconId: String?)

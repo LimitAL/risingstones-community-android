@@ -141,7 +141,7 @@ class GlamourViewModel(
             if (autoLoadList) {
                 refresh()
                 loadRaces()
-                if (profileAuthor == null) loadBrowsingCatalog()
+                loadBrowsingCatalog()
             }
         }
     }
@@ -169,10 +169,14 @@ class GlamourViewModel(
 
     fun applyFilter(filter: GlamourFilter) {
         val browsing = mutableBrowsingState.value
-        val preserveBrowsing = mutableState.value.source == GlamourListSource.Community && !browsing.following
+        val preserveBrowsing = !browsing.following
         applyFilters(
             filter,
-            if (preserveBrowsing) browsing.tribeId else null,
+            if (preserveBrowsing && mutableState.value.source == GlamourListSource.Community) {
+                browsing.tribeId
+            } else {
+                null
+            },
             if (preserveBrowsing) browsing.tagIds else emptySet(),
         )
     }
@@ -184,10 +188,11 @@ class GlamourViewModel(
     private fun applyFilters(filter: GlamourFilter, tribeId: Int?, tagIds: Set<Int>) {
         val current = mutableState.value
         val browsing = mutableBrowsingState.value
-        val allowBrowsingFilters = supportsBrowsing && catalogLoaded && current.source == GlamourListSource.Community
+        val allowBrowsingFilters = supportsBrowsing && catalogLoaded
         val validTags = if (allowBrowsingFilters) selectedTags(tagIds, browsing.tagCategories) else emptySet()
         val validTribe = tribeId?.takeIf { id ->
-            id > 0 && allowBrowsingFilters && browsing.tribes.any { it.id == id && it.raceId == filter.raceId }
+            id > 0 && current.source == GlamourListSource.Community &&
+                browsing.tribes.any { it.id == id && it.raceId == filter.raceId }
         }
         val effectiveFilter = normalizeFilter(filter, validTribe, validTags, current.source)
         if (current.filter == effectiveFilter && current.search == null && !browsing.following &&
@@ -1132,12 +1137,13 @@ class GlamourViewModel(
 
     private fun browseRequest(listing: GlamourListRequest, pageTime: String?): GlamourBrowseRequest {
         val browsing = mutableBrowsingState.value
-        val community = listing.source == GlamourListSource.Community && listing.search == null
+        val filterable = listing.search == null
+        val community = listing.source == GlamourListSource.Community && filterable
         return GlamourBrowseRequest(
             listing = listing,
             following = community && browsing.following,
             tribeId = browsing.tribeId.takeIf { community && !browsing.following },
-            tagIds = if (community && !browsing.following) browsing.tagIds else emptySet(),
+            tagIds = if (filterable && !browsing.following) browsing.tagIds else emptySet(),
             pageTime = pageTime,
         )
     }

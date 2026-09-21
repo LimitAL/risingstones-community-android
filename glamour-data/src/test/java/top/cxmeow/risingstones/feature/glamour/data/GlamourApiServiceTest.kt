@@ -183,6 +183,8 @@ class GlamourApiServiceTest {
         assertEquals("invite-42", detail.couponInviteCode)
         assertTrue(detail.isCouponClaimed)
         assertTrue(detail.isFollowingAuthor)
+        assertEquals(listOf("清新", "自定义风格"), detail.tags.map { it.name })
+        assertEquals(listOf(2, 1), detail.tags.map { it.categoryId })
 
         service.claimCoupon("invite-42", 42)
         val claim = transport.requests.first {
@@ -382,6 +384,10 @@ private val DETAIL = """
       "created_at":"2026-07-21 12:00:00","uuid":"author-1",
       "fashion_coupon":"1","inviate_code":"invite-42","is_receive":"1","relation":"2",
       "character_name":"Hero","area_name":"World","group_name":"DC",
+      "tags":[
+        {"tag_id":"8","tag_name":"清新","is_custom":"0","category_id":"2","category_name":"风格","category_sort":"1","tag_sort":"2"},
+        {"tag_id":"9","custom_name":"自定义风格","is_custom":"1","category_id":"1","category_name":"自定义","category_sort":"2","tag_sort":"1"}
+      ],
       "race_ids":[{"id":"1","name":"Hyur"}],
       "equipments":[{"slot":"BODY","equipment_id":"100","name":"Body","icon_id":"200",
         "dye_ids":["1"],"dyes":[{"id":"1","name":"Snow White","color":"#eeeeee"}]}],
