@@ -6,6 +6,9 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,6 +18,7 @@ import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataAvailabil
 import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataBoard
 import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataBoardContent
 import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataIdentity
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataException
 import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataOfficialCatalogs
 import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataService
 import top.cxmeow.risingstones.feature.personaldata.domain.UltimateDashboard
@@ -43,7 +47,7 @@ data class PersonalDataUiState(
 class PersonalDataViewModel(private val service: PersonalDataService) : ViewModel() {
     private val mutableState = MutableStateFlow(PersonalDataUiState())
     val state: StateFlow<PersonalDataUiState> = mutableState.asStateFlow()
-    val hasCommunityIdentity: Boolean get() = service.hasCommunityIdentity
+    val hasCommunityIdentity: Boolean get() = !isCleared && service.hasCommunityIdentity
     private val boardCache = mutableMapOf<PersonalDataBoard, PersonalDataBoardContent>()
     private val detailCache = mutableMapOf<Int, UltimateEncounterDetail>()
     private var dashboardCache: UltimateDashboard? = null
@@ -51,6 +55,12 @@ class PersonalDataViewModel(private val service: PersonalDataService) : ViewMode
     private var rootJob: Job? = null
     private var boardJob: Job? = null
     private var detailJob: Job? = null
+    private var catalogsJob: Job? = null
+    private var rootGeneration = 0L
+    private var boardGeneration = 0L
+    private var detailGeneration = 0L
+    private var catalogsGeneration = 0L
+    private var isCleared = false
 
     init {
         if (hasCommunityIdentity) {
@@ -60,126 +70,135 @@ class PersonalDataViewModel(private val service: PersonalDataService) : ViewMode
     }
 
     fun loadRoot(force: Boolean = false) {
+        if (!requireIdentity()) return
         val current = mutableState.value
-        if (!force && (current.identity != null || current.isLoadingRoot)) return
+        if (!force && (current.identity != null && current.availability != null || current.isLoadingRoot)) return
+        val generation = ++rootGeneration
         rootJob?.cancel()
+        mutableState.update { it.copy(isLoadingRoot = true, rootError = null) }
         rootJob = viewModelScope.launch {
-            mutableState.update { it.copy(isLoadingRoot = true, rootError = null) }
             try {
-                val identity = async { service.fetchIdentity() }
-                val availability = async { service.fetchAvailability() }
-                mutableState.update {
-                    it.copy(
-                        identity = identity.await(),
-                        availability = availability.await(),
-                        isLoadingRoot = false,
-                    )
+                val (identity, availability) = coroutineScope {
+                    val identity = async { service.fetchIdentity() }
+                    val availability = async { service.fetchAvailability() }
+                    identity.await() to availability.await()
                 }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                mutableState.update { it.copy(isLoadingRoot = false, rootError = error.message ?: error.toString()) }
+                currentCoroutineContext().ensureActive()
+                if (generation == rootGeneration && requireIdentity()) {
+                    mutableState.update { it.copy(identity = identity, availability = availability) }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                currentCoroutineContext().ensureActive()
+                if (generation == rootGeneration) handleFailure(error) { it.copy(rootError = LoadFailed) }
+            } finally {
+                if (generation == rootGeneration && requireIdentity()) {
+                    rootJob = null
+                    mutableState.update { it.copy(isLoadingRoot = false) }
+                }
             }
         }
     }
 
-    fun selectBoard(board: PersonalDataBoard) {
-        if (mutableState.value.selectedBoard == board) return
-        detailJob?.cancel()
-        mutableState.update {
-            it.copy(
-                selectedBoard = board,
-                content = boardCache[board],
-                dashboard = if (board == PersonalDataBoard.Ultimate) dashboardCache else null,
-                selectedEncounter = null,
-                encounterDetail = null,
-                isLoadingBoard = false,
-                isLoadingDetail = false,
-                boardError = null,
-                detailError = null,
-            )
+    fun selectBoard(board: PersonalDataBoard) = selectBoard(board, loadContent = true)
+
+    /** Allows an optional structured board owner to manage content without issuing legacy reads. */
+    fun selectBoard(board: PersonalDataBoard, loadContent: Boolean) {
+        if (!requireIdentity()) return
+        if (mutableState.value.selectedBoard == board && loadContent) {
+            mutableState.update { it.copy(
+                content = it.content ?: boardCache[board],
+                dashboard = if (board == PersonalDataBoard.Ultimate) it.dashboard ?: dashboardCache else null,
+            ) }
+            loadBoard()
+            return
         }
-        loadBoard()
+        cancelBoardAndDetail()
+        mutableState.update {
+            it.copy(selectedBoard = board, content = if (loadContent) boardCache[board] else null,
+                dashboard = if (loadContent && board == PersonalDataBoard.Ultimate) dashboardCache else null,
+                selectedEncounter = null, encounterDetail = null, isLoadingBoard = false,
+                isLoadingDetail = false, boardError = null, detailError = null)
+        }
+        if (loadContent) loadBoard()
     }
 
     fun clearBoardSelection() {
-        boardJob?.cancel()
-        detailJob?.cancel()
+        if (!requireIdentity()) return
+        cancelBoardAndDetail()
         mutableState.update {
-            it.copy(
-                selectedBoard = null,
-                content = null,
-                dashboard = null,
-                selectedEncounter = null,
-                encounterDetail = null,
-                isLoadingBoard = false,
-                isLoadingDetail = false,
-                boardError = null,
-                detailError = null,
-            )
+            it.copy(selectedBoard = null, content = null, dashboard = null, selectedEncounter = null,
+                encounterDetail = null, isLoadingBoard = false, isLoadingDetail = false,
+                boardError = null, detailError = null)
         }
     }
 
     fun loadBoard(force: Boolean = false) {
-        val board = mutableState.value.selectedBoard ?: return
-        if (!force) {
-            if (board == PersonalDataBoard.Ultimate && dashboardCache != null) return
-            if (board != PersonalDataBoard.Ultimate && boardCache[board] != null) return
-        }
+        if (!requireIdentity()) return
+        val current = mutableState.value
+        val board = current.selectedBoard ?: return
+        if (!force && (current.isLoadingBoard || if (board == PersonalDataBoard.Ultimate) dashboardCache != null
+                else boardCache[board] != null)) return
+        val generation = ++boardGeneration
         boardJob?.cancel()
+        mutableState.update { it.copy(isLoadingBoard = true, boardError = null) }
         boardJob = viewModelScope.launch {
-            mutableState.update { it.copy(isLoadingBoard = true, boardError = null) }
             try {
                 if (board == PersonalDataBoard.Ultimate) {
                     val dashboard = service.fetchUltimateDashboard()
-                    dashboardCache = dashboard
-                    mutableState.update {
-                        if (it.selectedBoard == board) it.copy(dashboard = dashboard, content = null, isLoadingBoard = false)
-                        else it
+                    currentCoroutineContext().ensureActive()
+                    if (generation == boardGeneration && requireIdentity()) {
+                        dashboardCache = dashboard
+                        mutableState.update { it.copy(dashboard = dashboard, content = null) }
                     }
                 } else {
-                    val content = service.fetchBoardContent(board)
-                    boardCache[board] = content
-                    mutableState.update {
-                        if (it.selectedBoard == board) it.copy(content = content, dashboard = null, isLoadingBoard = false)
-                        else it
+                    val response = service.fetchBoardContent(board)
+                    currentCoroutineContext().ensureActive()
+                    if (generation == boardGeneration && requireIdentity()) {
+                        if (response.board != board) throw PersonalDataException.MissingPayload
+                        val previous = boardCache[board]
+                        val content = response.copy(sections = response.sections.map { section ->
+                            if (section.error == null) section else section.copy(error = LoadFailed,
+                                entries = previous?.sections?.firstOrNull { it.id == section.id }?.entries ?: section.entries)
+                        })
+                        boardCache[board] = content
+                        mutableState.update { it.copy(content = content, dashboard = null) }
                     }
                 }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                mutableState.update {
-                    if (it.selectedBoard == board) it.copy(isLoadingBoard = false, boardError = error.message ?: error.toString())
-                    else it
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                currentCoroutineContext().ensureActive()
+                if (generation == boardGeneration) handleFailure(error) { it.copy(boardError = LoadFailed) }
+            } finally {
+                if (generation == boardGeneration && requireIdentity()) {
+                    boardJob = null
+                    mutableState.update { it.copy(isLoadingBoard = false) }
                 }
             }
         }
     }
 
     fun selectEncounter(summary: UltimateEncounterSummary) {
-        if (
-            mutableState.value.selectedEncounter?.territoryType == summary.territoryType &&
-            (mutableState.value.encounterDetail != null || mutableState.value.isLoadingDetail)
-        ) return
+        if (!requireIdentity()) return
+        val current = mutableState.value
+        if (current.selectedBoard != PersonalDataBoard.Ultimate) return
+        if (current.selectedEncounter?.territoryType == summary.territoryType &&
+            (current.encounterDetail != null || current.isLoadingDetail)) return
+        cancelDetail()
         mutableState.update {
-            it.copy(
-                selectedEncounter = summary,
-                encounterDetail = detailCache[summary.territoryType],
-                detailError = null,
-            )
+            it.copy(selectedEncounter = summary, encounterDetail = detailCache[summary.territoryType],
+                isLoadingDetail = false, detailError = null)
         }
         loadEncounterDetail(summary)
     }
 
     fun clearEncounterSelection() {
-        detailJob?.cancel()
+        if (!requireIdentity()) return
+        cancelDetail()
         mutableState.update {
-            it.copy(
-                selectedEncounter = null,
-                encounterDetail = null,
-                isLoadingDetail = false,
-                detailError = null,
-            )
+            it.copy(selectedEncounter = null, encounterDetail = null, isLoadingDetail = false, detailError = null)
         }
     }
 
@@ -187,59 +206,139 @@ class PersonalDataViewModel(private val service: PersonalDataService) : ViewMode
         summary: UltimateEncounterSummary? = mutableState.value.selectedEncounter,
         force: Boolean = false,
     ) {
+        if (!requireIdentity()) return
         val target = summary ?: return
-        if (!force && detailCache[target.territoryType] != null) return
+        val current = mutableState.value
+        if (current.selectedBoard != PersonalDataBoard.Ultimate || current.selectedEncounter?.territoryType != target.territoryType) return
+        if (!force && (current.isLoadingDetail || detailCache[target.territoryType] != null)) return
+        val generation = ++detailGeneration
         detailJob?.cancel()
+        mutableState.update { it.copy(isLoadingDetail = true, detailError = null) }
         detailJob = viewModelScope.launch {
-            mutableState.update { it.copy(isLoadingDetail = true, detailError = null) }
             try {
-                val detail = service.fetchUltimateEncounterDetail(target)
-                detailCache[target.territoryType] = detail
-                mutableState.update {
-                    if (it.selectedEncounter?.territoryType == target.territoryType) {
-                        it.copy(encounterDetail = detail, isLoadingDetail = false)
-                    } else it
+                val response = service.fetchUltimateEncounterDetail(target)
+                currentCoroutineContext().ensureActive()
+                if (generation == detailGeneration && requireIdentity()) {
+                    if (response.summary.territoryType != target.territoryType) throw PersonalDataException.MissingPayload
+                    val previous = detailCache[target.territoryType]
+                    val detail = response.copy(
+                        teammates = if ("team" in response.sectionErrors) previous?.teammates ?: response.teammates else response.teammates,
+                        jobs = if ("jobs" in response.sectionErrors) previous?.jobs ?: response.jobs else response.jobs,
+                        partners = if ("partners" in response.sectionErrors) previous?.partners ?: response.partners else response.partners,
+                        phases = if ("phases" in response.sectionErrors) previous?.phases ?: response.phases else response.phases,
+                        deathPoints = if ("deaths" in response.sectionErrors) previous?.deathPoints ?: response.deathPoints else response.deathPoints,
+                        sectionErrors = response.sectionErrors.mapValues { LoadFailed },
+                    )
+                    detailCache[target.territoryType] = detail
+                    mutableState.update { it.copy(encounterDetail = detail) }
                 }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                mutableState.update {
-                    if (it.selectedEncounter?.territoryType == target.territoryType) {
-                        it.copy(isLoadingDetail = false, detailError = error.message ?: error.toString())
-                    } else it
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                currentCoroutineContext().ensureActive()
+                if (generation == detailGeneration) handleFailure(error) { it.copy(detailError = LoadFailed) }
+            } finally {
+                if (generation == detailGeneration && requireIdentity()) {
+                    detailJob = null
+                    mutableState.update { it.copy(isLoadingDetail = false) }
                 }
             }
         }
     }
 
     fun loadCatalogs(force: Boolean = false) {
+        if (!requireIdentity()) return
         if (!force && (catalogsResolved || mutableState.value.isLoadingCatalogs)) return
-        viewModelScope.launch {
-            mutableState.update { it.copy(isLoadingCatalogs = true, catalogsError = null) }
+        val generation = ++catalogsGeneration
+        catalogsJob?.cancel()
+        mutableState.update { it.copy(isLoadingCatalogs = true, catalogsError = null) }
+        catalogsJob = viewModelScope.launch {
             try {
                 val catalogs = service.fetchOfficialCatalogs()
-                catalogsResolved = true
-                mutableState.update {
-                    it.copy(catalogs = catalogs, isLoadingCatalogs = false, catalogsError = null)
+                currentCoroutineContext().ensureActive()
+                if (generation == catalogsGeneration && requireIdentity()) {
+                    catalogsResolved = true
+                    mutableState.update { it.copy(catalogs = catalogs, catalogsError = null) }
                 }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                catalogsResolved = true
-                mutableState.update {
-                    it.copy(
-                        isLoadingCatalogs = false,
-                        catalogsError = error.message ?: error.toString(),
-                    )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                currentCoroutineContext().ensureActive()
+                if (generation == catalogsGeneration) {
+                    catalogsResolved = false
+                    handleFailure(error) { it.copy(catalogsError = LoadFailed) }
+                }
+            } finally {
+                if (generation == catalogsGeneration && requireIdentity()) {
+                    catalogsJob = null
+                    mutableState.update { it.copy(isLoadingCatalogs = false) }
                 }
             }
         }
     }
 
     fun refresh() {
+        if (!requireIdentity()) return
         loadRoot(force = true)
         loadBoard(force = true)
         loadEncounterDetail(force = true)
+        if (!catalogsResolved) loadCatalogs()
+    }
+
+    fun clearProtectedContent() {
+        ++rootGeneration
+        ++boardGeneration
+        ++detailGeneration
+        ++catalogsGeneration
+        rootJob?.cancel(); rootJob = null
+        boardJob?.cancel(); boardJob = null
+        detailJob?.cancel(); detailJob = null
+        catalogsJob?.cancel(); catalogsJob = null
+        boardCache.clear()
+        detailCache.clear()
+        dashboardCache = null
+        catalogsResolved = false
+        mutableState.value = PersonalDataUiState()
+    }
+
+    override fun onCleared() {
+        isCleared = true
+        clearProtectedContent()
+        super.onCleared()
+    }
+
+    private fun cancelDetail() {
+        ++detailGeneration
+        detailJob?.cancel()
+        detailJob = null
+    }
+
+    private fun cancelBoardAndDetail() {
+        ++boardGeneration
+        boardJob?.cancel()
+        boardJob = null
+        cancelDetail()
+    }
+
+    private fun requireIdentity(): Boolean {
+        if (isCleared) return false
+        if (service.hasCommunityIdentity) return true
+        clearProtectedContent()
+        mutableState.update { it.copy(rootError = AuthenticationRequired) }
+        return false
+    }
+
+    private fun handleFailure(error: Exception, update: (PersonalDataUiState) -> PersonalDataUiState) {
+        if (isCleared) return
+        if (error is PersonalDataException.AuthenticationRequired || !service.hasCommunityIdentity) {
+            clearProtectedContent()
+            mutableState.update { it.copy(rootError = AuthenticationRequired) }
+        } else mutableState.update(update)
+    }
+
+    private companion object {
+        const val AuthenticationRequired = "authentication_required"
+        const val LoadFailed = "load_failed"
     }
 }
 

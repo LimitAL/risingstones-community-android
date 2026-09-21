@@ -70,7 +70,7 @@ class RisingStonesApiClient(
                     cause = error,
                 )
             }
-            if (envelope.code != 10000) {
+            if (!RisingStonesResponsePolicy.accepts(envelope.code)) {
                 throw RisingStonesApiException(
                     message = envelope.message?.takeIf(String::isNotBlank)
                         ?: "Rising Stones session is not valid",

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="dynamic_title">動態</string>
+    <string name="dynamic_back">返回</string>
+    <string name="dynamic_refresh">重新整理</string>
+    <string name="dynamic_select">選擇一則動態查看詳情</string>
+    <string name="dynamic_sign_in">工作階段已過期，請重新登入。</string>
+    <string name="dynamic_unavailable">目前工作階段無法存取動態。</string>
+    <string name="dynamic_empty">暫無動態，關注社群成員後可查看更新。</string>
+    <string name="dynamic_more">載入更多</string>
+    <string name="dynamic_source">查看來源</string>
+    <string name="dynamic_comments">留言</string>
+    <string name="dynamic_no_comments">暫無留言</string>
+    <string name="dynamic_replies">查看 %1$d 則回覆</string>
+    <string name="dynamic_counts">%1$d 則留言 · %2$d 讚</string>
+    <string name="dynamic_reply_to">回覆 %1$s</string>
+    <string name="dynamic_image">開啟圖片</string>
+    <string name="dynamic_close">關閉</string>
+    <string name="dynamic_retry">重試</string>
+    <string name="dynamic_refresh_failed">重新整理失敗，仍可閱讀原有內容。</string>
+    <string name="dynamic_failed">無法載入動態。</string>
+    <string name="dynamic_origin_post">轉發文章</string>
+    <string name="dynamic_origin_guide">轉發攻略</string>
+    <string name="dynamic_origin_glamour">轉發幻化</string>
+    <string name="dynamic_origin_recruitment">轉發招募</string>
+    <string name="dynamic_unknown_author">社群成員</string>
+    <string name="dynamic_open_author_profile">查看 %1$s 的社群主頁</string>
+</resources>

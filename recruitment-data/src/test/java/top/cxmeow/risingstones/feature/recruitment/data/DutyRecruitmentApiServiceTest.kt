@@ -3,6 +3,10 @@ package top.cxmeow.risingstones.feature.recruitment.data
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -11,6 +15,7 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import top.cxmeow.risingstones.core.auth.RisingStonesCapability
+import top.cxmeow.risingstones.core.auth.RisingStonesIdentityConflictResolver
 import top.cxmeow.risingstones.core.auth.RisingStonesRequestAuthorizer
 import top.cxmeow.risingstones.core.auth.RisingStonesSessionProvider
 import top.cxmeow.risingstones.feature.recruitment.domain.CommunityRecruitmentKind
@@ -19,6 +24,7 @@ import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentExcepti
 import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentListQuery
 import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentPosition
 import top.cxmeow.risingstones.network.RisingStonesHttpClient
+import top.cxmeow.risingstones.network.RisingStonesHttpException
 import top.cxmeow.risingstones.network.RisingStonesHttpMethod
 import top.cxmeow.risingstones.network.RisingStonesHttpRequest
 import top.cxmeow.risingstones.network.RisingStonesHttpResponse
@@ -178,11 +184,180 @@ class DutyRecruitmentApiServiceTest {
         Unit
     }
 
-    private fun service(transport: RisingStonesHttpClient) = DutyRecruitmentApiService(
+    @Test
+    fun acceptedCodesPreserveRecruitmentReadsWithoutRefreshingForContradictoryMessages() = runBlocking {
+        for (code in listOf(10000, 10002)) {
+            val transport = RecruitmentResponseCodeTransport(code)
+            val provider = RecruitmentResponseCodeCredential()
+            val service = service(transport, provider)
+            assertEquals(42, service.fetchDutyRecruitments(DutyRecruitmentListQuery()).items.single().id)
+            assertEquals(42, service.fetchDutyRecruitmentDetail(42).summary.id)
+            for (kind in CommunityRecruitmentKind.entries) {
+                assertEquals(1, service.fetchCommunityRecruitments(CommunityRecruitmentQuery(kind)).items.size)
+            }
+            assertEquals(11, service.fetchCommunityRecruitmentDetail(11, CommunityRecruitmentKind.Beginner).summary.id)
+            assertEquals(14, service.fetchCommunityRecruitmentDetail(14, CommunityRecruitmentKind.RolePlay).summary.id)
+            assertEquals(1, service.fetchCatalogs().jobs.size)
+            assertEquals(1, service.fetchRolePlayMembers(14).size)
+            assertEquals(1, service.fetchRolePlayReviews(14, 1, 10).items.size)
+            assertEquals(1, service.fetchRolePlaySubcomments("review-1", 1, 3).items.size)
+            assertEquals(listOf(1, 2, 3, 4, 5), service.fetchRolePlayRating(14).counts)
+            assertEquals(1, service.fetchCommunityFilterCatalog(CommunityRecruitmentKind.Beginner).styles.size)
+            assertEquals(16, transport.requests.size)
+            assertTrue(transport.requests.all { it.method == RisingStonesHttpMethod.Get })
+            assertEquals(0, provider.refreshes)
+            assertEquals(0, provider.resolutions)
+        }
+    }
+
+    @Test
+    fun acceptedCodesRemainAvailableForAnonymousPublicReads() = runBlocking {
+        for (code in listOf(10000, 10002)) {
+            val transport = RecruitmentResponseCodeTransport(code)
+            assertEquals(42, service(transport, MissingRecruitmentCredential)
+                .fetchDutyRecruitments(DutyRecruitmentListQuery()).items.single().id)
+            assertEquals(1, transport.requests.size)
+            assertTrue(transport.requests.single().headers.isEmpty())
+        }
+    }
+
+    @Test
+    fun acceptedCodesSubmitEachRecruitmentMutationOnlyOnce() = runBlocking {
+        for (code in listOf(10000, 10002)) {
+            val transport = RecruitmentResponseCodeTransport(code)
+            val provider = RecruitmentResponseCodeCredential()
+            val service = service(transport, provider)
+            assertEquals("Leader contact", service.respondToDutyRecruitment(42, "Fixture contact"))
+            assertEquals("Recruiter contact", service.respondToBeginnerRecruitment(11, "Fixture contact"))
+            assertEquals(1, service.likeRolePlayReview("review-1"))
+            assertEquals(listOf("responseRecruitFb", "responseNoviceEntertain", "rpCommentlike"),
+                transport.requests.map { it.url.toHttpUrl().pathSegments.last() })
+            assertTrue(transport.requests.all { it.method == RisingStonesHttpMethod.Post })
+            assertEquals(0, provider.refreshes)
+            assertEquals(0, provider.resolutions)
+        }
+    }
+
+    @Test
+    fun acceptedCodesStillRequireExistingListDetailAndLikePayloads() {
+        for (code in listOf(10000, 10002)) {
+            val transport = RecruitmentResponseCodeTransport(code, omitPayload = true)
+            val provider = RecruitmentResponseCodeCredential()
+            val service = service(transport, provider)
+            val actions = listOf<suspend () -> Any>(
+                { service.fetchDutyRecruitments(DutyRecruitmentListQuery()) },
+                { service.fetchDutyRecruitmentDetail(42) },
+                { service.fetchCommunityRecruitments(CommunityRecruitmentQuery(CommunityRecruitmentKind.Guild)) },
+                { service.fetchCommunityRecruitmentDetail(11, CommunityRecruitmentKind.Beginner) },
+                { service.fetchRolePlayMembers(14) },
+                { service.fetchRolePlayReviews(14, 1, 10) },
+                { service.fetchRolePlaySubcomments("review-1", 1, 3) },
+                { service.likeRolePlayReview("review-1") },
+            )
+            actions.forEach { action ->
+                assertThrows(DutyRecruitmentException.MissingPayload::class.java) { runBlocking { action() } }
+            }
+            assertEquals(actions.size, transport.requests.size)
+            assertEquals(0, provider.refreshes)
+            assertEquals(0, provider.resolutions)
+        }
+    }
+
+    @Test
+    fun legacyMutationsNeverReplayAuthenticationOrIdentityConflictFailures() {
+        for (code in listOf(401, 10105)) {
+            val transport = RecruitmentResponseCodeTransport(code)
+            val provider = RecruitmentResponseCodeCredential()
+            assertThrows(Exception::class.java) {
+                runBlocking {
+                    service(transport, provider).respondToDutyRecruitment(42, "Fixture contact")
+                }
+            }
+            assertEquals(1, transport.requests.size)
+            assertEquals(if (code == 401) 1 else 0, provider.refreshes)
+            assertEquals(0, provider.resolutions)
+        }
+    }
+
+    @Test
+    fun legacyMutationRejectsHttpFailureEvenWhenTheBusinessBodyLooksSuccessful() {
+        val requests = mutableListOf<RisingStonesHttpRequest>()
+        val provider = RecruitmentResponseCodeCredential()
+        val transport = object : RisingStonesHttpClient {
+            override suspend fun execute(request: RisingStonesHttpRequest): RisingStonesHttpResponse {
+                requests += request
+                return RisingStonesHttpResponse(
+                    500,
+                    emptyMap(),
+                    """{"code":10000,"data":{"recruit_contact_info":"Must not complete"}}""".encodeToByteArray(),
+                )
+            }
+        }
+        assertThrows(RisingStonesHttpException.ServerResponse::class.java) {
+            runBlocking { service(transport, provider).respondToDutyRecruitment(42, "Fixture") }
+        }
+        assertEquals(1, requests.size)
+        assertEquals(0, provider.refreshes)
+        assertEquals(0, provider.resolutions)
+    }
+
+    @Test
+    fun explicitExpiredResponsesStillRefreshOnceThenFail() {
+        val transport = RecruitmentResponseCodeTransport(401)
+        val provider = RecruitmentResponseCodeCredential()
+        assertThrows(DutyRecruitmentException.AuthenticationRequired::class.java) {
+            runBlocking { service(transport, provider).fetchDutyRecruitmentDetail(42) }
+        }
+        assertEquals(2, transport.requests.size)
+        assertEquals(1, provider.refreshes)
+        assertEquals(0, provider.resolutions)
+    }
+
+    @Test
+    fun explicitConflictCanResolveToAcceptedCodeWithoutAnotherRefresh() = runBlocking {
+        val transport = RecruitmentResponseCodeTransport(10105)
+        val provider = RecruitmentResponseCodeCredential().apply {
+            onResolution = { transport.code = 10002 }
+        }
+        assertEquals(42, service(transport, provider).fetchDutyRecruitmentDetail(42).summary.id)
+        assertEquals(2, transport.requests.size)
+        assertEquals(1, provider.resolutions)
+        assertEquals(0, provider.refreshes)
+    }
+
+    private fun service(transport: RisingStonesHttpClient, provider: RisingStonesSessionProvider = RecruitmentCredential) = DutyRecruitmentApiService(
         RisingStonesPublicApiClient(transport, listOf("https://rising.test")),
-        RecruitmentCredential,
+        provider,
         temporarySessionId = "session-1",
     )
+}
+
+private class RecruitmentResponseCodeCredential : RisingStonesSessionProvider, RisingStonesIdentityConflictResolver {
+    override val capabilities = setOf(RisingStonesCapability.RecruitmentAuthenticated, RisingStonesCapability.RecruitmentWrite)
+    var refreshes = 0
+    var resolutions = 0
+    var onResolution: () -> Unit = {}
+    override suspend fun currentAuthorizer() = RisingStonesRequestAuthorizer { _, sink -> sink.set("User-Agent", "fixture-paired-agent") }
+    override suspend fun refreshAuthorizer(): RisingStonesRequestAuthorizer { refreshes++; return currentAuthorizer() }
+    override suspend fun awaitIdentityConflictResolution(): RisingStonesRequestAuthorizer {
+        resolutions++
+        onResolution()
+        return currentAuthorizer()
+    }
+}
+
+private class RecruitmentResponseCodeTransport(var code: Int, private val omitPayload: Boolean = false) : RisingStonesHttpClient {
+    private val delegate = RecruitmentTransport()
+    val requests = mutableListOf<RisingStonesHttpRequest>()
+    override suspend fun execute(request: RisingStonesHttpRequest): RisingStonesHttpResponse {
+        requests += request
+        val response = delegate.execute(request)
+        val body = Json.parseToJsonElement(response.body.decodeToString()).jsonObject.toMutableMap()
+        body["code"] = JsonPrimitive(code)
+        body["msg"] = JsonPrimitive("未登录 session expired")
+        if (omitPayload) body.remove("data")
+        return response.copy(body = JsonObject(body).toString().encodeToByteArray())
+    }
 }
 
 private object RecruitmentCredential : RisingStonesSessionProvider {

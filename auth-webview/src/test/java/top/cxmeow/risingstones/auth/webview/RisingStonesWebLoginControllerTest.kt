@@ -35,21 +35,29 @@ class RisingStonesWebLoginControllerTest {
     fun candidateGateDeduplicatesWithinAttemptButAllowsExplicitRetry() {
         val gate = RisingStonesCookieCandidateGate()
 
-        assertTrue(gate.shouldEmit("same-cookie", returnGeneration = 0))
-        assertFalse(gate.shouldEmit("same-cookie", returnGeneration = 0))
+        assertTrue(gate.shouldEmit("same-cookie", "FixtureWebView/1.0", returnGeneration = 0))
+        assertFalse(gate.shouldEmit("same-cookie", "FixtureWebView/1.0", returnGeneration = 0))
 
         gate.startAttempt()
 
-        assertTrue(gate.shouldEmit("same-cookie", returnGeneration = 0))
+        assertTrue(gate.shouldEmit("same-cookie", "FixtureWebView/1.0", returnGeneration = 0))
     }
 
     @Test
     fun candidateGateAllowsSameCookieAfterAuthenticationReturn() {
         val gate = RisingStonesCookieCandidateGate()
 
-        assertTrue(gate.shouldEmit("same-cookie", returnGeneration = 0))
-        assertTrue(gate.shouldEmit("same-cookie", returnGeneration = 1))
-        assertFalse(gate.shouldEmit("same-cookie", returnGeneration = 1))
+        assertTrue(gate.shouldEmit("same-cookie", "FixtureWebView/1.0", returnGeneration = 0))
+        assertTrue(gate.shouldEmit("same-cookie", "FixtureWebView/1.0", returnGeneration = 1))
+        assertFalse(gate.shouldEmit("same-cookie", "FixtureWebView/1.0", returnGeneration = 1))
+    }
+
+    @Test
+    fun candidateGateIncludesTheMatchingUserAgentInItsIdentity() {
+        val gate = RisingStonesCookieCandidateGate()
+        assertTrue(gate.shouldEmit("same-cookie", "FirstWebView/1.0", 0))
+        assertFalse(gate.shouldEmit("same-cookie", "FirstWebView/1.0", 0))
+        assertTrue(gate.shouldEmit("same-cookie", "SecondWebView/1.0", 0))
     }
 
     @Test

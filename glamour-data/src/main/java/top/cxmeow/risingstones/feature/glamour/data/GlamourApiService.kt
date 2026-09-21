@@ -8,6 +8,7 @@ import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -45,29 +46,83 @@ import top.cxmeow.risingstones.feature.glamour.domain.GlamourAuthorProfile
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourRace
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourService
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourSearchSelection
+import top.cxmeow.risingstones.feature.glamour.domain.GlamourBrowseRequest
+import top.cxmeow.risingstones.feature.glamour.domain.GlamourBrowsePage
+import top.cxmeow.risingstones.feature.glamour.domain.GlamourBrowsingService
+import top.cxmeow.risingstones.feature.glamour.domain.GlamourCollectionService
+import top.cxmeow.risingstones.feature.glamour.domain.GlamourFolderNameMaximumLength
+import top.cxmeow.risingstones.feature.glamour.domain.GlamourTag
+import top.cxmeow.risingstones.feature.glamour.domain.GlamourTagCategory
+import top.cxmeow.risingstones.feature.glamour.domain.GlamourTribe
+import top.cxmeow.risingstones.feature.glamour.domain.GlamourTransportException
 import top.cxmeow.risingstones.network.RisingStonesApiQueryItem
 import top.cxmeow.risingstones.network.RisingStonesApiRequest
 import top.cxmeow.risingstones.network.RisingStonesHttpException
 import top.cxmeow.risingstones.network.RisingStonesHttpMethod
 import top.cxmeow.risingstones.network.RisingStonesPublicApiClient
+import top.cxmeow.risingstones.network.RisingStonesResponsePolicy
 
 class GlamourApiService(
     private val client: RisingStonesPublicApiClient,
     private val sessionProvider: RisingStonesSessionProvider?,
     private val json: Json = Json { ignoreUnknownKeys = true; explicitNulls = false },
     private val temporarySessionId: String = UUID.randomUUID().toString(),
-) : GlamourService {
+) : GlamourBrowsingService, GlamourCollectionService {
     override val hasCommunityIdentity: Boolean
         get() = sessionProvider?.capabilities?.contains(
             RisingStonesCapability.GlamourAuthenticated,
         ) == true
 
-    override suspend fun fetchGlamours(request: GlamourListRequest): GlamourListPage {
+    override suspend fun fetchGlamours(request: GlamourListRequest): GlamourListPage = listPage(request, null).page
+
+    override suspend fun fetchBrowsePage(request: GlamourBrowseRequest): GlamourBrowsePage {
+        require(request.tagIds.all { it > 0 } && request.tribeId?.let { it > 0 } != false)
+        if (request.following) require(request.listing.source == GlamourListSource.Community &&
+            request.listing.search == null && request.listing.filter == top.cxmeow.risingstones.feature.glamour.domain.GlamourFilter() &&
+            request.listing.authorId.isNullOrBlank() &&
+            request.tagIds.isEmpty() && request.tribeId == null)
+        if (request.tagIds.isNotEmpty() || request.tribeId != null) require(request.listing.source == GlamourListSource.Community && request.listing.search == null)
+        return listPage(request.listing, request)
+    }
+
+    override suspend fun fetchTagCategories(): List<GlamourTagCategory> {
+        val data = perform { headers -> RisingStonesApiRequest("api/home/glamour/tagList", headers = headers) }
+            .objectValue("data") ?: throw GlamourException.MissingPayload
+        val categories = data["categories"] as? JsonArray ?: throw GlamourException.MissingPayload
+        return categories.map { it as? JsonObject ?: throw GlamourException.MissingPayload }
+            .sortedBy { it.intValue("sort") ?: 0 }.map { category ->
+                val tags = category["tags"] as? JsonArray ?: throw GlamourException.MissingPayload
+                GlamourTagCategory(category.intValue("id") ?: throw GlamourException.MissingPayload,
+                    category.stringValue("name") ?: throw GlamourException.MissingPayload,
+                    tags.map { it as? JsonObject ?: throw GlamourException.MissingPayload }
+                        .sortedBy { it.intValue("sort") ?: 0 }.map { tag ->
+                            GlamourTag(tag.intValue("id") ?: throw GlamourException.MissingPayload,
+                                tag.stringValue("name") ?: throw GlamourException.MissingPayload)
+                        })
+            }
+    }
+
+    override suspend fun fetchTribes(): List<GlamourTribe> {
+        val data = perform { headers -> RisingStonesApiRequest("api/home/gameData/tribeList", headers = headers) }
+            .objectValue("data") ?: throw GlamourException.MissingPayload
+        val rows = data["list"] as? JsonArray ?: throw GlamourException.MissingPayload
+        return rows.map { it as? JsonObject ?: throw GlamourException.MissingPayload }
+            .sortedBy { it.intValue("sort") ?: 0 }.map { tribe ->
+                GlamourTribe(tribe.intValue("id") ?: throw GlamourException.MissingPayload,
+                    tribe.intValue("race_id") ?: throw GlamourException.MissingPayload,
+                    tribe.stringValue("name") ?: throw GlamourException.MissingPayload)
+            }
+    }
+
+    private suspend fun listPage(request: GlamourListRequest, browse: GlamourBrowseRequest?): GlamourBrowsePage {
         val page = request.page.coerceAtLeast(1)
         val limit = request.limit.coerceAtLeast(1)
         val query = mutableListOf(
             q("page", page), q("limit", limit), q("tempsuid", temporarySessionId),
         )
+        if (page > 1) browse?.pageTime?.takeIf(String::isNotBlank)?.let { query += q("pageTime", it) }
+        browse?.tagIds?.takeIf { it.isNotEmpty() }?.let { query += q("tag_ids", it.sorted().joinToString(",")) }
+        browse?.tribeId?.let { query += q("tribe_id", it) }
         request.filter.order.wireValue?.let { query += q("order", it) }
         request.filter.raceId?.let { query += q("race_id", it) }
         request.filter.genderId?.let { query += q("gender_id", it) }
@@ -98,21 +153,29 @@ class GlamourApiService(
                 if (search.searchByOrnament) query += q("searchByOrnament", 1)
                 "api/common/search"
             } else {
-                "api/home/glamour/glamoursList"
+                if (browse?.following == true) "api/home/glamour/glamoursFollowList" else "api/home/glamour/glamoursList"
             }
         }
         val response = perform { headers ->
             RisingStonesApiRequest(path, query = query, headers = headers)
         }
         val payload = response.objectValue("data") ?: throw GlamourException.MissingPayload
-        val items = payload.arrayValue("rows").mapNotNull(::listing)
+        val items = if (browse == null) {
+            payload.arrayValue("rows").mapNotNull(::listing)
+        } else {
+            val rows = payload["rows"] as? JsonArray ?: throw GlamourException.MissingPayload
+            rows.map { listing(it) ?: throw GlamourException.MissingPayload }
+        }
         val reported = payload.intValue("count")
         val hasNext = if (isGlobalSearch) {
             reported?.let { page * limit < it } ?: (items.size >= limit)
+        } else if (browse != null && request.source == GlamourListSource.Community) {
+            // The official feed continues until an empty page; count is not consistently a total.
+            items.isNotEmpty()
         } else {
             maxOf(reported ?: 0, items.size) >= limit
         }
-        return GlamourListPage(items, page, hasNext)
+        return GlamourBrowsePage(GlamourListPage(items, page, hasNext), payload.stringValue("pageTime"))
     }
 
     private fun GlamourSearchSelection.scopedQueryItems(
@@ -164,21 +227,34 @@ class GlamourApiService(
     }
 
     override suspend fun createFavoriteFolder(name: String, isPublic: Boolean) {
+        val normalizedName = name.trim()
+        require(normalizedName.length in 1..GlamourFolderNameMaximumLength)
         form(
             "api/home/glamour/createFavorites",
-            listOf("name" to name, "is_public" to if (isPublic) "1" else "0"),
+            listOf("name" to normalizedName, "is_public" to if (isPublic) "1" else "0"),
+        )
+    }
+
+    override suspend fun updateFavoriteFolder(id: Int, name: String, isPublic: Boolean) {
+        require(id > 0)
+        val normalizedName = name.trim()
+        require(normalizedName.length in 1..GlamourFolderNameMaximumLength)
+        form(
+            "api/home/glamour/updateFavorites",
+            listOf("id" to "$id", "name" to normalizedName, "is_public" to if (isPublic) "1" else "0"),
         )
     }
 
     override suspend fun deleteFavoriteFolder(id: Int) {
+        require(id > 0)
         perform { headers ->
             RisingStonesApiRequest(
                 "api/home/glamour/deleteFavorites",
                 method = RisingStonesHttpMethod.Delete,
                 query = listOf(q("tempsuid", temporarySessionId)),
                 headers = headers,
-                body = "{\"id\":\"$id\"}".encodeToByteArray(),
-                contentType = "application/json; charset=utf-8",
+                body = "id=$id".encodeToByteArray(),
+                contentType = "application/x-www-form-urlencoded; charset=utf-8",
             )
         }
     }
@@ -262,45 +338,56 @@ class GlamourApiService(
                 query = listOf(q("page", page.coerceAtLeast(1)), q("limit", 20), q("name", name), q("tempsuid", temporarySessionId)),
                 headers = headers,
             )
-        }.objectValue("data")
-        return data?.arrayValue("rows").orEmpty().mapNotNull { value ->
-            val item = value as? JsonObject ?: return@mapNotNull null
+        }.objectValue("data") ?: throw GlamourException.MissingPayload
+        val rows = data["rows"] as? JsonArray ?: throw GlamourException.MissingPayload
+        return rows.map { value ->
+            val item = value as? JsonObject ?: throw GlamourException.MissingPayload
+            val jobs = item.element("class_jobs", "classJobs")?.let {
+                it as? JsonArray ?: throw GlamourException.MissingPayload
+            }.orEmpty()
             GlamourEquipmentSearchResult(
-                item.intValue("id") ?: return@mapNotNull null,
-                item.stringValue("name") ?: return@mapNotNull null,
-                item.stringValue("desc").orEmpty(),
-                item.stringValue("icon_id", "iconId"),
-                item.arrayValue("class_jobs", "classJobs").mapNotNull {
-                    (it as? JsonObject)?.stringValue("name")
+                item.intValue("id") ?: throw GlamourException.MissingPayload,
+                item.stringValue("name") ?: throw GlamourException.MissingPayload,
+                item.stringValue("desc", "des").orEmpty(),
+                item.stringValue("icon_id", "iconId", "icon"),
+                jobs.map {
+                    (it as? JsonObject)?.stringValue("name") ?: throw GlamourException.MissingPayload
                 },
             )
         }
     }
 
-    override suspend fun searchGlasses(name: String): List<GlamourGlassesSearchGroup> =
-        perform { headers ->
+    override suspend fun searchGlasses(name: String): List<GlamourGlassesSearchGroup> {
+        val response = perform { headers ->
             RisingStonesApiRequest(
                 "api/home/gameData/getGlassesList",
                 query = listOf(q("name", name), q("tempsuid", temporarySessionId)),
                 headers = headers,
             )
-        }.arrayValue("data").mapNotNull { value ->
-            val item = value as? JsonObject ?: return@mapNotNull null
+        }
+        val groups = response["data"] as? JsonArray ?: throw GlamourException.MissingPayload
+        return groups.map { value ->
+            val item = value as? JsonObject ?: throw GlamourException.MissingPayload
+            val accessories = item["list"] as? JsonArray ?: throw GlamourException.MissingPayload
             GlamourGlassesSearchGroup(
-                item.intValue("style_id", "styleId") ?: return@mapNotNull null,
-                item.stringValue("style_name", "styleName") ?: return@mapNotNull null,
-                item.arrayValue("list").mapNotNull(::searchAccessory),
+                item.intValue("style_id", "styleId") ?: throw GlamourException.MissingPayload,
+                item.stringValue("style_name", "styleName") ?: throw GlamourException.MissingPayload,
+                accessories.map { searchAccessory(it) ?: throw GlamourException.MissingPayload },
             )
         }
+    }
 
-    override suspend fun searchOrnaments(name: String): List<GlamourAccessorySearchResult> =
-        perform { headers ->
+    override suspend fun searchOrnaments(name: String): List<GlamourAccessorySearchResult> {
+        val data = perform { headers ->
             RisingStonesApiRequest(
                 "api/home/gameData/getOrnamentList",
                 query = listOf(q("name", name), q("tempsuid", temporarySessionId)),
                 headers = headers,
             )
-        }.objectValue("data")?.arrayValue("rows").orEmpty().mapNotNull(::searchAccessory)
+        }.objectValue("data") ?: throw GlamourException.MissingPayload
+        val rows = data["rows"] as? JsonArray ?: throw GlamourException.MissingPayload
+        return rows.map { searchAccessory(it) ?: throw GlamourException.MissingPayload }
+    }
 
     override suspend fun fetchDetail(id: Int): GlamourDetail {
         val data = perform { headers ->
@@ -342,7 +429,7 @@ class GlamourApiService(
                 ?.trim()
                 ?.takeIf(String::isNotEmpty),
             (data.intValue("is_receive", "isReceive") ?: user?.intValue("is_receive", "isReceive") ?: 0) == 1,
-            (data.intValue("relation") ?: 0) == 2,
+            (data.intValue("relation") ?: 0) in 2..3,
         )
     }
 
@@ -354,9 +441,15 @@ class GlamourApiService(
     }
 
     override suspend fun favorite(id: Int) {
+        require(id > 0)
         val folder = fetchFavoriteFolders().firstOrNull(GlamourFavoriteFolder::isDefault)
             ?: throw GlamourException.MissingDefaultFavoriteFolder
-        form("api/home/glamour/favorite", listOf("id" to "$id", "favorite_id" to "${folder.id}"))
+        favoriteInFolder(id, folder.id)
+    }
+
+    override suspend fun favoriteInFolder(id: Int, folderId: Int) {
+        require(id > 0 && folderId > 0)
+        form("api/home/glamour/favorite", listOf("id" to "$id", "favorite_id" to "$folderId"))
     }
 
     override suspend fun cancelFavorite(id: Int) {
@@ -384,40 +477,47 @@ class GlamourApiService(
     private suspend fun perform(
         request: (Map<String, String>) -> RisingStonesApiRequest,
     ): JsonObject {
-        if (!hasCommunityIdentity) throw GlamourException.AuthenticationRequired
-        val initialAuthorizer = sessionProvider?.currentAuthorizer()
-            ?: throw GlamourException.AuthenticationRequired
         suspend fun execute(authorizer: RisingStonesRequestAuthorizer): JsonObject {
+            if (!hasCommunityIdentity) throw GlamourException.AuthenticationRequired
             val path = request(emptyMap()).path
             val headers = authorizer.headers(path)
-            return json.parseToJsonElement(
-                client.execute(request(headers)).body.decodeToString(),
-            ).jsonObject
-        }
-        var response = try {
-            execute(initialAuthorizer)
-        } catch (error: Throwable) {
-            when {
-                error.isHttpIdentityConflict() -> execute(
-                    (sessionProvider as? RisingStonesIdentityConflictResolver)
-                        ?.awaitIdentityConflictResolution() ?: throw error,
-                )
-                error.isHttpAuthenticationFailure() -> execute(
-                    sessionProvider.refreshAuthorizer() ?: throw error,
-                )
-                else -> throw error
+            val response = client.execute(request(headers))
+            if (response.statusCode !in 200..299) {
+                throw RisingStonesHttpException.ServerResponse(response.statusCode, response.body)
             }
+            val root = try { json.parseToJsonElement(response.body.decodeToString()) as? JsonObject }
+                catch (_: IllegalArgumentException) { null } ?: throw GlamourException.MissingPayload
+            return root
         }
-        if (response.intValue("code") == 10105) {
-            (sessionProvider as? RisingStonesIdentityConflictResolver)
-                ?.awaitIdentityConflictResolution()
-                ?.let { response = execute(it) }
-        } else if (response.isAuthenticationFailure()) {
-            sessionProvider.refreshAuthorizer()?.let { response = execute(it) }
-        }
-        val code = response.intValue("code") ?: 0
-        if (code != 10000) throw GlamourException.Business(code, response.stringValue("msg", "message"))
-        return response
+        try {
+            if (!hasCommunityIdentity) throw GlamourException.AuthenticationRequired
+            var authorizer = sessionProvider?.currentAuthorizer()
+                ?: throw GlamourException.AuthenticationRequired
+            repeat(2) { attempt ->
+                var conflict = false
+                val response = try { execute(authorizer) }
+                catch (error: CancellationException) { throw error }
+                catch (error: Exception) {
+                    conflict = error.isHttpIdentityConflict()
+                    if (error is GlamourException.AuthenticationRequired || error.isHttpAuthenticationFailure() || conflict) null
+                    else throw error
+                }
+                if (response != null && response.intValue("code") != 10105 && !response.isAuthenticationFailure()) {
+                    val code = response.intValue("code") ?: throw GlamourException.MissingPayload
+                    if (!RisingStonesResponsePolicy.accepts(code)) throw GlamourException.Business(code, null)
+                    return response
+                }
+                if (attempt == 1) throw GlamourException.AuthenticationRequired
+                conflict = conflict || response?.intValue("code") == 10105
+                authorizer = (if (conflict && sessionProvider is RisingStonesIdentityConflictResolver) {
+                    sessionProvider.awaitIdentityConflictResolution()
+                } else sessionProvider.refreshAuthorizer()) ?: throw GlamourException.AuthenticationRequired
+                if (!hasCommunityIdentity) throw GlamourException.AuthenticationRequired
+            }
+            throw GlamourException.AuthenticationRequired
+        } catch (error: CancellationException) { throw error
+        } catch (error: GlamourException) { throw error
+        } catch (_: Exception) { throw GlamourTransportException() }
     }
 
     private fun listing(value: JsonElement): GlamourListingSummary? {
@@ -449,9 +549,11 @@ class GlamourApiService(
 
     private fun equipment(value: JsonElement): GlamourEquipment? {
         val item = value as? JsonObject ?: return null
+        val equipmentId = item.intValue("equipment_id", "equipmentId")
+        if (equipmentId == -1) return null
         return GlamourEquipment(
             item.stringValue("slot") ?: return null,
-            item.intValue("equipment_id", "equipmentId"),
+            equipmentId,
             item.stringValue("name"),
             item.stringValue("icon_id", "iconId"),
             item.intArray("dye_ids", "dyeIds"),
@@ -471,13 +573,14 @@ class GlamourApiService(
         return GlamourAccessorySearchResult(
             item.intValue("id") ?: return null,
             item.stringValue("name") ?: return null,
-            item.stringValue("desc").orEmpty(),
-            item.stringValue("icon"),
+            item.stringValue("desc", "des").orEmpty(),
+            item.stringValue("icon", "icon_id", "iconId"),
         )
     }
 
     private fun JsonObject.accessory(prefix: String): GlamourAccessory? {
         val id = intValue("${prefix}_id", "${prefix}Id") ?: return null
+        if (id == -1) return null
         val name = stringValue("${prefix}_name", "${prefix}Name")?.takeIf(String::isNotBlank)
             ?: return null
         return GlamourAccessory(id, name, stringValue("${prefix}_icon", "${prefix}Icon"))
@@ -545,8 +648,9 @@ private fun JsonObject.intArray(vararg names: String): List<Int> = arrayValue(*n
 
 private fun JsonObject.isAuthenticationFailure(): Boolean {
     val code = intValue("code")
+    if (RisingStonesResponsePolicy.accepts(code)) return false
     if (code == 10105) return false
-    if (code in setOf(401, 403, 10002, 10003, 10004, 10005)) return true
+    if (code in setOf(401, 403, 10001, 10403, 10003, 10004, 10005)) return true
     val message = stringValue("msg", "message").orEmpty().lowercase()
     return listOf("未登录", "登录失效", "登录过期", "token失效", "unauthorized", "session expired")
         .any(message::contains)

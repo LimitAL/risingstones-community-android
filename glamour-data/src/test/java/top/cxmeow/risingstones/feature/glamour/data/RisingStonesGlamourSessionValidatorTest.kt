@@ -17,6 +17,27 @@ import top.cxmeow.risingstones.network.RisingStonesSessionValidator
 
 class RisingStonesGlamourSessionValidatorTest {
     @Test
+    fun alternateAcceptedProbeGrantsOnlyItsOwnCapability() = runBlocking {
+        val transport = GlamourValidationTransport(
+            """{"code":10002,"msg":"未登录","data":{"rows":[],"count":0}}""",
+        )
+        val result = validator(transport).validateSession(RisingStonesRequestAuthorizer { _, _ -> })
+        assertEquals(setOf(RisingStonesCapability.AccountRead, RisingStonesCapability.GlamourAuthenticated),
+            result.capabilities)
+        assertEquals(1, transport.requestCount)
+    }
+
+    @Test
+    fun alternateAcceptedProbeWithoutRequiredDataDoesNotGrantCapability() = runBlocking {
+        for (payload in listOf("", ",\"data\":null", ",\"data\":[]")) {
+            val transport = GlamourValidationTransport("""{"code":10002$payload}""")
+            val result = validator(transport).validateSession(RisingStonesRequestAuthorizer { _, _ -> })
+            assertEquals(setOf(RisingStonesCapability.AccountRead), result.capabilities)
+            assertEquals(1, transport.requestCount)
+        }
+    }
+
+    @Test
     fun capabilityIsGrantedOnlyAfterTheReadProbeSucceeds() = runBlocking {
         val transport = GlamourValidationTransport(
             """{"code":10000,"data":{"rows":[],"count":0}}""",
@@ -92,8 +113,10 @@ private class GlamourValidationTransport(
     private val error: Exception? = null,
 ) : RisingStonesHttpClient {
     var lastRequest: RisingStonesHttpRequest? = null
+    var requestCount = 0
 
     override suspend fun execute(request: RisingStonesHttpRequest): RisingStonesHttpResponse {
+        requestCount++
         lastRequest = request
         error?.let { throw it }
         return RisingStonesHttpResponse(

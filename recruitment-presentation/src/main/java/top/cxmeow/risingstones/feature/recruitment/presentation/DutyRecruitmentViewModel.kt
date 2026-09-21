@@ -4,7 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -13,6 +16,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
+import top.cxmeow.risingstones.feature.recruitment.domain.RecruitmentAuthorService
+import top.cxmeow.risingstones.feature.recruitment.domain.RecruitmentActionEligibilityService
+import top.cxmeow.risingstones.feature.recruitment.domain.CommunityRecruitmentAuthorPage
+import top.cxmeow.risingstones.feature.recruitment.domain.RolePlayReviewAuthorPage
+import top.cxmeow.risingstones.feature.recruitment.domain.RolePlaySubcommentAuthorPage
 import top.cxmeow.risingstones.feature.recruitment.domain.CommunityRecruitmentDetail
 import top.cxmeow.risingstones.feature.recruitment.domain.CommunityRecruitmentFilterCatalog
 import top.cxmeow.risingstones.feature.recruitment.domain.CommunityRecruitmentKind
@@ -20,6 +28,14 @@ import top.cxmeow.risingstones.feature.recruitment.domain.CommunityRecruitmentQu
 import top.cxmeow.risingstones.feature.recruitment.domain.CommunityRecruitmentSummary
 import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentCatalogs
 import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentDetail
+import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentException
+import top.cxmeow.risingstones.feature.recruitment.domain.RecruitmentInteractionService
+import top.cxmeow.risingstones.feature.recruitment.domain.RecruitmentBrowsingService
+import top.cxmeow.risingstones.feature.recruitment.domain.RecruitmentResponseEligibilityService
+import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentBrowseQuery
+import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentFilterCatalog
+import top.cxmeow.risingstones.feature.recruitment.domain.RolePlayRecruitmentReviewOrder
+import top.cxmeow.risingstones.feature.recruitment.domain.RolePlayRecruitmentReviewQuery
 import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentListQuery
 import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentPosition
 import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentService
@@ -91,18 +107,62 @@ data class DutyRecruitmentUiState(
 
 enum class RecruitmentNotice { ResponseSubmitted }
 
+enum class RecruitmentInteractionError { Unavailable, AuthenticationRequired, InvalidInput, Failed }
+
+/** Transient interaction state retained by the ViewModel, never persisted to storage. */
+data class RecruitmentInteractionState(
+    val isCurrentUserAuthor: Boolean? = null,
+    val isResponseComposerOpen: Boolean = false,
+    val contactDraft: String = "",
+    val responseSuccessRevision: Long = 0,
+    val hasRefreshedResponseContact: Boolean = false,
+    val responseError: RecruitmentInteractionError? = null,
+    val interactionError: RecruitmentInteractionError? = null,
+    val selectedReviewId: String? = null,
+    val reviewsErrorIsPagination: Boolean = false,
+    val subcommentPages: Map<String, Int> = emptyMap(),
+    val hasMoreSubcommentIds: Set<String> = emptySet(),
+    val subcommentErrors: Map<String, RecruitmentInteractionError> = emptyMap(),
+    val subcommentErrorIsPaginationIds: Set<String> = emptySet(),
+)
+
+data class RecruitmentBrowsingState(
+    val dutyQuery: DutyRecruitmentBrowseQuery = DutyRecruitmentBrowseQuery(),
+    val dutyFilterCatalog: DutyRecruitmentFilterCatalog? = null,
+    val reviewOrder: RolePlayRecruitmentReviewOrder = RolePlayRecruitmentReviewOrder.Latest,
+)
+
 class DutyRecruitmentViewModel(
     private val service: DutyRecruitmentService,
     private val autoLoadList: Boolean = true,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(DutyRecruitmentUiState())
     val state: StateFlow<DutyRecruitmentUiState> = mutableState.asStateFlow()
-    val hasCommunityIdentity: Boolean get() = service.hasCommunityIdentity
-    private var listJob: Job? = null
-    private var detailJob: Job? = null
+    private val mutableAuthorState = MutableStateFlow(RecruitmentAuthorState())
+    val authorState: StateFlow<RecruitmentAuthorState> = mutableAuthorState.asStateFlow()
+    private val mutableInteractionState = MutableStateFlow(RecruitmentInteractionState())
+    val interactionState: StateFlow<RecruitmentInteractionState> = mutableInteractionState.asStateFlow()
+    private val mutableBrowsingState = MutableStateFlow(RecruitmentBrowsingState())
+    val browsingState: StateFlow<RecruitmentBrowsingState> = mutableBrowsingState.asStateFlow()
+    val canBrowseExtended: Boolean get() = !cleared && service is RecruitmentBrowsingService
+    val canRespond: Boolean get() = canInteract && validResponseTarget()
+    private var cleared = false
+    private var authorizationRevoked = false
+    val hasCommunityIdentity: Boolean get() = !cleared && !authorizationRevoked && service.hasCommunityIdentity
+    val canWrite: Boolean get() = !cleared && !authorizationRevoked &&
+        (service as? RecruitmentInteractionService)?.canPerformAuthenticatedWrites == true
+    val canAttemptWrite: Boolean get() = !cleared && !authorizationRevoked &&
+        (service as? RecruitmentActionEligibilityService)?.canAttemptAuthenticatedWrites == true
+    val canInteract: Boolean get() = canWrite || canAttemptWrite
+
+    private var nextRequest = 0L
+    private val requests = mutableMapOf<String, Long>()
+    private val jobs = mutableMapOf<String, Job>()
     private val communityQueries = CommunityRecruitmentKind.entries.associateWithTo(mutableMapOf()) {
         CommunityRecruitmentQuery(it)
     }
+    private val respondedTargets = mutableMapOf<Pair<RecruitmentBoardKind, Int>, String?>()
+    private val confirmedLikes = mutableMapOf<String, Pair<Boolean, Int>>()
 
     init {
         loadCatalogs()
@@ -110,640 +170,707 @@ class DutyRecruitmentViewModel(
     }
 
     fun selectBoard(board: RecruitmentBoardKind, loadList: Boolean = true) {
+        if (cleared) return
         if (mutableState.value.board == board) {
             if (loadList && currentItemsAreEmpty()) refresh()
             return
         }
-        listJob?.cancel()
-        detailJob?.cancel()
-        val communityKind = board.communityKind
+        cancelRequest("list")
+        cancelRequest("filter")
+        clearSelection()
+        mutableAuthorState.value = RecruitmentAuthorState()
+        val kind = board.communityKind
         mutableState.update {
             it.copy(
                 board = board,
-                communityQuery = communityKind?.let { kind -> communityQueries.getValue(kind) }
-                    ?: it.communityQuery,
-                dutyItems = emptyList(),
-                communityItems = emptyList(),
-                page = 1,
-                totalCount = 0,
-                hasMore = false,
-                selectedId = null,
-                dutyDetail = null,
-                communityDetail = null,
-                members = emptyList(),
-                reviews = emptyList(),
-                reviewsPage = 0,
-                hasMoreReviews = false,
-                rating = null,
-                subcomments = emptyMap(),
-                filterCatalog = CommunityRecruitmentFilterCatalog(),
-                isLoadingFilterCatalog = false,
+                communityQuery = kind?.let(communityQueries::getValue) ?: it.communityQuery,
+                dutyItems = emptyList(), communityItems = emptyList(), page = 1, totalCount = 0, hasMore = false,
+                isLoading = false, isRefreshing = false, isLoadingMore = false,
+                listError = null, listErrorIsPagination = false,
+                filterCatalog = CommunityRecruitmentFilterCatalog(), isLoadingFilterCatalog = false,
                 filterCatalogError = null,
-                isLoading = false,
-                isRefreshing = false,
-                isLoadingMore = false,
-                listError = null,
-                listErrorIsPagination = false,
-                isLoadingDetail = false,
-                detailError = null,
-                isLoadingMembers = false,
-                membersError = null,
-                isLoadingReviews = false,
-                isLoadingMoreReviews = false,
-                reviewsError = null,
-                isLoadingRating = false,
-                ratingError = null,
-                responseContactInfo = null,
-                responseError = null,
-                interactionError = null,
-                error = null,
-                notice = null,
             )
         }
-        if (communityKind != null && (!communityKind.requiresAuthentication || hasCommunityIdentity)) {
-            loadFilterCatalog(communityKind)
-        }
-        if (loadList && (board != RecruitmentBoardKind.Guild || hasCommunityIdentity)) refresh()
+        if (kind != null && (!kind.requiresAuthentication || hasCommunityIdentity)) loadFilterCatalog(kind)
+        if (loadList) refresh()
     }
 
     fun applyDutyFilter(dutyType: String, dutyName: String, position: DutyRecruitmentPosition?) {
-        mutableState.update {
-            it.copy(
-                dutyQuery = it.dutyQuery.copy(
-                    dutyType = dutyType,
-                    dutyName = dutyName,
-                    position = position,
-                ),
-            )
+        val query = state.value.dutyQuery.copy(
+            page = 1, limit = DutyPageSize, dutyType = dutyType.trim(), dutyName = dutyName.trim(),
+            position = position?.takeIf { it in DutyRecruitmentPosition.options(dutyType) },
+        )
+        applyDutyBrowseFilter(DutyRecruitmentBrowseQuery(list = query))
+    }
+
+    fun applyDutyBrowseFilter(query: DutyRecruitmentBrowseQuery) {
+        if (cleared || state.value.board != RecruitmentBoardKind.Duty) return
+        if (!canBrowseExtended && query != DutyRecruitmentBrowseQuery(list = query.list)) {
+            setInteractionError(RecruitmentInteractionError.Unavailable)
+            return
+        }
+        val normalized = query.copy(
+            list = query.list.copy(page = 1, limit = DutyPageSize, dutyType = query.list.dutyType.trim(), dutyName = query.list.dutyName.trim()),
+            positions = query.positions.distinct(), teamComposition = query.teamComposition.trim(),
+            targetAreaId = query.targetAreaId.trim(), labelIds = query.labelIds.distinct(), allianceTeamKey = query.allianceTeamKey.trim(),
+        )
+        if (normalized != browsingState.value.dutyQuery) {
+            cancelRequest("list")
+            mutableBrowsingState.update { it.copy(dutyQuery = normalized) }
+            mutableState.update { it.copy(dutyQuery = normalized.list, dutyItems = emptyList(), page = 1, totalCount = 0, hasMore = false) }
         }
         refresh()
+    }
+
+    fun setReviewOrder(order: RolePlayRecruitmentReviewOrder) {
+        if (cleared || order == browsingState.value.reviewOrder) return
+        if (!canBrowseExtended) {
+            setInteractionError(RecruitmentInteractionError.Unavailable)
+            return
+        }
+        mutableBrowsingState.update { it.copy(reviewOrder = order) }
+        mutableAuthorState.update { it.copy(reviewAuthors = emptyMap(), subcommentAuthors = emptyMap()) }
+        requests.keys.filter { it == "reviews" || it.startsWith("sub:") || it.startsWith("like:") }.toList().forEach(::cancelRequest)
+        mutableState.update {
+            it.copy(reviews = emptyList(), reviewsPage = 0, hasMoreReviews = false,
+                isLoadingReviews = false, isLoadingMoreReviews = false, reviewsError = null,
+                subcomments = emptyMap(), loadingSubcommentIds = emptySet(), likingReviewIds = emptySet())
+        }
+        mutableInteractionState.update {
+            it.copy(selectedReviewId = null, reviewsErrorIsPagination = false, subcommentPages = emptyMap(),
+                hasMoreSubcommentIds = emptySet(), subcommentErrors = emptyMap(), subcommentErrorIsPaginationIds = emptySet())
+        }
+        refreshReviews()
     }
 
     fun applyCommunityFilter(query: CommunityRecruitmentQuery) {
-        val currentKind = mutableState.value.board.communityKind ?: return
-        if (query.kind != currentKind) return
-        val normalized = query.copy(page = 1, limit = CommunityPageSize)
-        communityQueries[currentKind] = normalized
-        mutableState.update { it.copy(communityQuery = normalized) }
+        if (cleared || query.kind != state.value.board.communityKind) return
+        val normalized = query.copy(page = 1, limit = CommunityPageSize, keyword = query.keyword.trim())
+        communityQueries[query.kind] = normalized
+        if (normalized != state.value.communityQuery) {
+            cancelRequest("list")
+            mutableAuthorState.update { it.copy(communityAuthors = emptyMap()) }
+            mutableState.update {
+                it.copy(communityQuery = normalized, communityItems = emptyList(), page = 1, totalCount = 0, hasMore = false)
+            }
+        }
         refresh()
     }
 
-    fun refresh() {
-        val requested = mutableState.value
-        if (requested.board == RecruitmentBoardKind.Guild && !hasCommunityIdentity) return
-        listJob?.cancel()
-        listJob = viewModelScope.launch {
-            val hasContent = if (requested.board == RecruitmentBoardKind.Duty) {
-                requested.dutyItems.isNotEmpty()
-            } else {
-                requested.communityItems.isNotEmpty()
-            }
-            mutableState.update {
-                it.copy(
-                    isLoading = !hasContent,
-                    isRefreshing = hasContent,
-                    isLoadingMore = false,
-                    listError = null,
-                    listErrorIsPagination = false,
-                    page = 1,
-                )
-            }
-            try {
-                if (requested.board == RecruitmentBoardKind.Duty) {
-                    val result = service.fetchDutyRecruitments(
-                        requested.dutyQuery.copy(page = 1, limit = DutyPageSize),
-                    )
-                    mutableState.update { current ->
-                        if (current.board != requested.board || current.dutyQuery != requested.dutyQuery) current
-                        else current.copy(
-                            dutyItems = result.items,
-                            communityItems = emptyList(),
-                            page = result.currentPage,
-                            totalCount = result.totalCount,
-                            hasMore = result.items.size < result.totalCount,
-                            isLoading = false,
-                            isRefreshing = false,
-                            listError = null,
-                            listErrorIsPagination = false,
-                        )
-                    }
-                } else {
-                    val result = service.fetchCommunityRecruitments(
-                        requested.communityQuery.copy(page = 1, limit = CommunityPageSize),
-                    )
-                    mutableState.update { current ->
-                        if (current.board != requested.board || current.communityQuery != requested.communityQuery) current
-                        else current.copy(
-                            communityItems = result.items,
-                            dutyItems = emptyList(),
-                            page = result.currentPage,
-                            totalCount = result.totalCount,
-                            hasMore = result.items.size >= CommunityPageSize,
-                            isLoading = false,
-                            isRefreshing = false,
-                            listError = null,
-                            listErrorIsPagination = false,
-                        )
-                    }
-                }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                mutableState.update { current ->
-                    if (current.board != requested.board) current
-                    else current.copy(
-                        hasMore = if (hasContent) current.hasMore else false,
-                        isLoading = false,
-                        isRefreshing = false,
-                        listError = error.message,
-                        listErrorIsPagination = false,
-                    )
-                }
-            }
-        }
-    }
+    fun refresh() = loadList(append = false)
 
     fun loadMore() {
-        val requested = mutableState.value
-        if (!requested.hasMore || requested.isLoading || requested.isLoadingMore) return
-        viewModelScope.launch {
-            mutableState.update {
-                it.copy(isLoadingMore = true, listError = null, listErrorIsPagination = false)
-            }
-            try {
-                val nextPage = requested.page + 1
-                if (requested.board == RecruitmentBoardKind.Duty) {
-                    val result = service.fetchDutyRecruitments(
-                        requested.dutyQuery.copy(page = nextPage, limit = DutyPageSize),
-                    )
-                    mutableState.update { current ->
-                        if (current.board != requested.board || current.dutyQuery != requested.dutyQuery) current
-                        else {
-                            val ids = current.dutyItems.mapTo(mutableSetOf(), DutyRecruitmentSummary::id)
-                            val next = result.items.filterNot { it.id in ids }
-                            current.copy(
-                                dutyItems = current.dutyItems + next,
-                                page = result.currentPage,
-                                totalCount = result.totalCount,
-                                hasMore = current.dutyItems.size + next.size < result.totalCount && next.isNotEmpty(),
-                                isLoadingMore = false,
-                            )
-                        }
-                    }
-                } else {
-                    val result = service.fetchCommunityRecruitments(
-                        requested.communityQuery.copy(page = nextPage, limit = CommunityPageSize),
-                    )
-                    mutableState.update { current ->
-                        if (current.board != requested.board || current.communityQuery != requested.communityQuery) current
-                        else {
-                            val ids = current.communityItems.mapTo(mutableSetOf(), CommunityRecruitmentSummary::id)
-                            val next = result.items.filterNot { it.id in ids }
-                            current.copy(
-                                communityItems = current.communityItems + next,
-                                page = result.currentPage,
-                                totalCount = result.totalCount,
-                                hasMore = result.items.size >= CommunityPageSize && next.isNotEmpty(),
-                                isLoadingMore = false,
-                            )
-                        }
-                    }
-                }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
+        val current = state.value
+        if (!current.hasMore || current.isLoading || current.isRefreshing || current.isLoadingMore) return
+        loadList(append = true)
+    }
+
+    private fun loadList(append: Boolean) {
+        if (cleared) return
+        val requested = state.value
+        if (requested.board == RecruitmentBoardKind.Guild && !hasCommunityIdentity) {
+            clearProtectedContent()
+            return
+        }
+        val page = if (append) requested.page + 1 else 1
+        val requestedBrowse = browsingState.value.dutyQuery
+        val hasContent = !currentItemsAreEmpty()
+        mutableState.update {
+            it.copy(isLoading = !append && !hasContent, isRefreshing = !append && hasContent,
+                isLoadingMore = append, listError = null, listErrorIsPagination = false)
+        }
+        launchRequest("list", onFailure = { error ->
+            mutableState.update { it.copy(listError = error.name, listErrorIsPagination = append) }
+        }, onFinish = {
+            mutableState.update { it.copy(isLoading = false, isRefreshing = false, isLoadingMore = false) }
+        }) { request ->
+            if (requested.board == RecruitmentBoardKind.Duty) {
+                val result = if (service is RecruitmentBrowsingService) {
+                    service.fetchDutyRecruitments(requestedBrowse.copy(list = requested.dutyQuery.copy(page = page, limit = DutyPageSize)))
+                } else service.fetchDutyRecruitments(requested.dutyQuery.copy(page = page, limit = DutyPageSize))
+                if (!request.accept()) return@launchRequest
                 mutableState.update { current ->
-                    if (current.board == requested.board) current.copy(
-                        isLoadingMore = false,
-                        listError = error.message,
-                        listErrorIsPagination = true,
-                    ) else current
+                    val old = if (append) current.dutyItems else emptyList()
+                    val items = (old + result.items).distinctBy { it.id }
+                    current.copy(dutyItems = items, communityItems = emptyList(), page = result.currentPage,
+                        totalCount = result.totalCount,
+                        hasMore = items.size < result.totalCount && result.items.isNotEmpty() && (!append || items.size > old.size))
+                }
+            } else {
+                val query = requested.communityQuery.copy(page = page, limit = CommunityPageSize)
+                val rich = (service as? RecruitmentAuthorService)?.fetchCommunityRecruitmentsWithAuthors(query)
+                    ?: CommunityRecruitmentAuthorPage(service.fetchCommunityRecruitments(query), emptyMap())
+                val result = rich.page
+                if (!request.accept()) return@launchRequest
+                val oldIds = if (append) state.value.communityItems.map { it.id } else emptyList()
+                mutableAuthorState.update { it.copy(communityAuthors = mergeAuthors(
+                    if (append) it.communityAuthors else emptyMap(), oldIds, rich.authorUuids, result.items.map { item -> item.id },
+                )) }
+                mutableState.update { current ->
+                    val old = if (append) current.communityItems else emptyList()
+                    val items = (old + result.items).distinctBy { it.id }
+                    current.copy(communityItems = items, dutyItems = emptyList(), page = result.currentPage,
+                        totalCount = result.totalCount,
+                        hasMore = result.items.size >= CommunityPageSize && (!append || items.size > old.size))
                 }
             }
         }
     }
 
     fun selectDetail(id: Int) {
-        val current = mutableState.value
-        val hasCurrentDetail = current.dutyDetail?.summary?.id == id ||
-            current.communityDetail?.summary?.id == id
-        if (current.selectedId == id && hasCurrentDetail) return
-        mutableState.update {
-            it.copy(
-                selectedId = id,
-                dutyDetail = null,
-                communityDetail = null,
-                isLoadingDetail = false,
-                detailError = null,
-                members = emptyList(),
-                isLoadingMembers = false,
-                membersError = null,
-                reviews = emptyList(),
-                reviewsPage = 0,
-                hasMoreReviews = false,
-                isLoadingReviews = false,
-                reviewsError = null,
-                rating = null,
-                isLoadingRating = false,
-                ratingError = null,
-                subcomments = emptyMap(),
-                responseContactInfo = null,
-                responseError = null,
-                interactionError = null,
-            )
-        }
-        loadDetail(id, preserveContent = false)
+        if (cleared) return
+        val current = state.value
+        if (current.selectedId == id && (current.isLoadingDetail || current.dutyDetail != null || current.communityDetail != null)) return
+        clearSelection()
+        mutableState.update { it.copy(selectedId = id) }
+        loadDetail()
     }
 
     fun clearSelection() {
-        detailJob?.cancel()
+        cancelTargetRequests()
+        mutableAuthorState.update { it.copy(selectedAuthorUuid = null, reviewAuthors = emptyMap(), subcommentAuthors = emptyMap()) }
+        confirmedLikes.clear()
+        val revision = interactionState.value.responseSuccessRevision
+        mutableInteractionState.value = RecruitmentInteractionState(responseSuccessRevision = revision)
         mutableState.update {
-            it.copy(
-                selectedId = null,
-                dutyDetail = null,
-                communityDetail = null,
-                isLoadingDetail = false,
-                detailError = null,
-                members = emptyList(),
-                isLoadingMembers = false,
-                membersError = null,
-                reviews = emptyList(),
-                reviewsPage = 0,
-                hasMoreReviews = false,
-                isLoadingReviews = false,
-                isLoadingMoreReviews = false,
-                reviewsError = null,
-                rating = null,
-                isLoadingRating = false,
-                ratingError = null,
-                subcomments = emptyMap(),
-                loadingSubcommentIds = emptySet(),
-                likingReviewIds = emptySet(),
-                responseContactInfo = null,
-                responseError = null,
-                interactionError = null,
-            )
+            it.copy(selectedId = null, dutyDetail = null, communityDetail = null, isLoadingDetail = false, detailError = null,
+                members = emptyList(), isLoadingMembers = false, membersError = null,
+                reviews = emptyList(), reviewsPage = 0, hasMoreReviews = false, isLoadingReviews = false,
+                isLoadingMoreReviews = false, reviewsError = null,
+                rating = null, isLoadingRating = false, ratingError = null,
+                subcomments = emptyMap(), loadingSubcommentIds = emptySet(), likingReviewIds = emptySet(),
+                isResponding = false, responseContactInfo = null, responseError = null,
+                interactionError = null, error = null, notice = null)
         }
     }
 
-    fun refreshDetail() {
-        mutableState.value.selectedId?.let { loadDetail(it, preserveContent = true) }
-    }
+    fun refreshDetail() = loadDetail()
+    fun retryDetail() = loadDetail()
 
-    fun retryDetail() {
-        mutableState.value.selectedId?.let { loadDetail(it, preserveContent = false) }
-    }
-
-    private fun loadDetail(id: Int, preserveContent: Boolean) {
-        detailJob?.cancel()
-        val requestedBoard = mutableState.value.board
-        detailJob = viewModelScope.launch {
-            mutableState.update {
-                it.copy(
-                    isLoadingDetail = true,
-                    dutyDetail = if (preserveContent) it.dutyDetail else null,
-                    communityDetail = if (preserveContent) it.communityDetail else null,
-                    detailError = null,
-                )
-            }
-            try {
-                if (requestedBoard == RecruitmentBoardKind.Duty) {
-                    val detail = service.fetchDutyRecruitmentDetail(id)
-                    mutableState.update { current ->
-                        if (current.board == requestedBoard && current.selectedId == id) current.copy(
-                            dutyDetail = detail,
-                            communityDetail = null,
-                            isLoadingDetail = false,
-                            detailError = null,
-                        ) else current
-                    }
-                } else {
-                    val kind = requireNotNull(requestedBoard.communityKind)
-                    val detail = service.fetchCommunityRecruitmentDetail(id, kind)
-                    mutableState.update { current ->
-                        if (current.board == requestedBoard && current.selectedId == id) current.copy(
-                            communityDetail = detail,
-                            dutyDetail = null,
-                            isLoadingDetail = false,
-                            detailError = null,
-                        ) else current
-                    }
-                    if (kind == CommunityRecruitmentKind.RolePlay) loadRolePlayExtras(id, requestedBoard)
-                }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                mutableState.update { current ->
-                    if (current.board == requestedBoard && current.selectedId == id) current.copy(
-                        isLoadingDetail = false,
-                        detailError = error.message,
-                    ) else current
+    private fun loadDetail() {
+        if (cleared) return
+        val requested = state.value
+        val id = requested.selectedId ?: return
+        if (requested.board == RecruitmentBoardKind.Guild && !hasCommunityIdentity) {
+            clearProtectedContent()
+            return
+        }
+        val target = requested.board to id
+        // Only a read requested after acknowledgement can replace a missing write response contact.
+        val refreshesResponseContact = target in respondedTargets
+        mutableState.update { it.copy(isLoadingDetail = true, detailError = null) }
+        launchRequest("detail", onFailure = { error ->
+            mutableState.update { it.copy(detailError = error.name) }
+        }, onFinish = { mutableState.update { it.copy(isLoadingDetail = false) } }) { request ->
+            if (requested.board == RecruitmentBoardKind.Duty) {
+                val rich = (service as? RecruitmentResponseEligibilityService)?.fetchDutyInteractionDetail(id)
+                val result = rich?.detail ?: service.fetchDutyRecruitmentDetail(id)
+                if (!request.accept()) return@launchRequest
+                mutableAuthorState.update { it.copy(selectedAuthorUuid = result.summary.uuid?.takeIf(String::isNotBlank)) }
+                mutableInteractionState.update { it.copy(isCurrentUserAuthor = rich?.isCurrentUserAuthor?.takeUnless { authorizationRevoked }) }
+                val acknowledged = if (target in respondedTargets) result.copy(
+                    isResponded = true,
+                    contactInfo = if (refreshesResponseContact) result.contactInfo else respondedTargets[target] ?: result.contactInfo,
+                ) else result
+                val detail = if (authorizationRevoked) acknowledged.copy(contactInfo = "", isResponded = false) else acknowledged
+                mutableState.update { it.copy(dutyDetail = detail, communityDetail = null,
+                    responseContactInfo = if (refreshesResponseContact) result.contactInfo.takeIf(String::isNotBlank) else it.responseContactInfo) }
+                if (refreshesResponseContact) confirmRefreshedContact(target, result.contactInfo.takeIf(String::isNotBlank))
+            } else {
+                val kind = requireNotNull(requested.board.communityKind)
+                val authorDetail = (service as? RecruitmentAuthorService)?.fetchCommunityDetailWithAuthor(id, kind)
+                val rich = authorDetail?.interaction
+                    ?: (service as? RecruitmentResponseEligibilityService)?.fetchCommunityInteractionDetail(id, kind)
+                val result = rich?.detail ?: service.fetchCommunityRecruitmentDetail(id, kind)
+                if (!request.accept()) return@launchRequest
+                mutableAuthorState.update { it.copy(selectedAuthorUuid = authorDetail?.authorUuid?.takeIf(String::isNotBlank)) }
+                mutableInteractionState.update { it.copy(isCurrentUserAuthor = rich?.isCurrentUserAuthor?.takeUnless { authorizationRevoked }) }
+                val fetchedContact = result.summary.beginner?.recruiterContactInfo
+                val acknowledged = if (target in respondedTargets) result.markResponded(
+                    if (refreshesResponseContact) fetchedContact else respondedTargets[target] ?: fetchedContact,
+                ) else result
+                val detail = if (authorizationRevoked) acknowledged.copy(summary = acknowledged.summary.copy(
+                    beginner = acknowledged.summary.beginner?.copy(isResponded = false, recruiterContactInfo = null),
+                )) else acknowledged
+                mutableState.update { it.copy(communityDetail = detail, dutyDetail = null,
+                    responseContactInfo = if (refreshesResponseContact) fetchedContact?.takeIf(String::isNotBlank) else it.responseContactInfo) }
+                if (refreshesResponseContact) confirmRefreshedContact(target, fetchedContact?.takeIf(String::isNotBlank))
+                if (requested.board == RecruitmentBoardKind.RolePlay) {
+                    refreshMembers()
+                    refreshReviews()
+                    refreshRating()
                 }
             }
         }
     }
+
+    fun openResponseComposer() {
+        if (state.value.isResponding || !requireWrite(response = true)) return
+        if (!validResponseTarget()) {
+            setResponseError(RecruitmentInteractionError.InvalidInput)
+            return
+        }
+        mutableInteractionState.update { it.copy(isResponseComposerOpen = true, responseError = null) }
+        mutableState.update { it.copy(responseError = null) }
+    }
+
+    /** Reopen a retained draft for viewing or discarding; submission still checks current eligibility. */
+    fun resumeResponseComposer() {
+        if (interactionState.value.contactDraft.isEmpty()) return
+        if (!canInteract) {
+            clearProtectedContent()
+            setResponseError(RecruitmentInteractionError.Unavailable)
+            return
+        }
+        if (state.value.isResponding) return
+        val error = if (canRespond) null else RecruitmentInteractionError.InvalidInput
+        mutableInteractionState.update { it.copy(isResponseComposerOpen = true, responseError = error) }
+        mutableState.update { it.copy(responseError = error?.name) }
+    }
+
+    fun closeResponseComposer() {
+        if (!state.value.isResponding) mutableInteractionState.update { it.copy(isResponseComposerOpen = false) }
+    }
+
+    fun discardResponseDraft() {
+        if (state.value.isResponding) return
+        mutableInteractionState.update { it.copy(isResponseComposerOpen = false, contactDraft = "", responseError = null) }
+        mutableState.update { it.copy(responseError = null) }
+    }
+
+    fun updateResponseDraft(text: String) {
+        if (!canInteract || state.value.isResponding) return
+        mutableInteractionState.update { it.copy(contactDraft = text, responseError = null) }
+        mutableState.update { it.copy(responseError = null) }
+    }
+
+    fun submitResponseDraft() = respond(interactionState.value.contactDraft)
 
     fun respond(contactInfo: String, onSuccess: () -> Unit = {}) {
-        val requested = mutableState.value
-        val id = requested.selectedId ?: return
-        val normalized = contactInfo.trim().take(MaximumContactLength)
-        if (normalized.isEmpty() || requested.isResponding) return
-        viewModelScope.launch {
-            mutableState.update { it.copy(isResponding = true, responseError = null) }
-            try {
-                val returned = if (requested.board == RecruitmentBoardKind.Beginner) {
-                    service.respondToBeginnerRecruitment(id, normalized)
-                } else {
-                    service.respondToDutyRecruitment(id, normalized)
-                }
-                mutableState.update { current ->
-                    if (current.board != requested.board || current.selectedId != id) current
-                    else current.copy(
-                        isResponding = false,
-                        responseContactInfo = returned ?: normalized,
-                        dutyDetail = current.dutyDetail?.copy(isResponded = true),
-                        communityDetail = current.communityDetail?.let { detail ->
-                            detail.copy(
-                                summary = detail.summary.copy(
-                                    beginner = detail.summary.beginner?.copy(isResponded = true),
-                                ),
-                            )
-                        },
-                        responseError = null,
-                        notice = RecruitmentNotice.ResponseSubmitted,
-                    )
-                }
-                onSuccess()
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                mutableState.update { it.copy(isResponding = false, responseError = error.message) }
+        if (state.value.isResponding || !requireWrite(response = true)) return
+        val normalized = contactInfo.trim()
+        if (!validResponseTarget() || normalized.isEmpty() || normalized.length > MaximumContactLength) {
+            setResponseError(RecruitmentInteractionError.InvalidInput)
+            return
+        }
+        val requested = state.value
+        val id = requireNotNull(requested.selectedId)
+        mutableState.update { it.copy(isResponding = true, responseError = null) }
+        mutableInteractionState.update { it.copy(responseError = null) }
+        launchRequest("response", onFailure = ::setResponseError,
+            onFinish = { mutableState.update { it.copy(isResponding = false) } }) { request ->
+            if (!checkPendingWrite(response = true)) return@launchRequest
+            if (!validResponseTarget()) {
+                setResponseError(RecruitmentInteractionError.InvalidInput)
+                return@launchRequest
             }
+            val returned = when (requested.board) {
+                RecruitmentBoardKind.Duty -> service.respondToDutyRecruitment(id, normalized)
+                RecruitmentBoardKind.Beginner -> service.respondToBeginnerRecruitment(id, normalized)
+                else -> return@launchRequest
+            }
+            if (!request.accept()) return@launchRequest
+            if (!checkPendingWrite(response = true)) return@launchRequest
+            respondedTargets[requested.board to id] = returned
+            mutableState.update {
+                it.copy(responseContactInfo = returned, dutyDetail = it.dutyDetail?.copy(isResponded = true),
+                    communityDetail = it.communityDetail?.markResponded(returned),
+                    communityItems = it.communityItems.map { summary ->
+                        if (summary.id == id) summary.copy(beginner = summary.beginner?.copy(isResponded = true, recruiterContactInfo = returned))
+                        else summary
+                    }, responseError = null, notice = RecruitmentNotice.ResponseSubmitted)
+            }
+            mutableInteractionState.update {
+                it.copy(isResponseComposerOpen = false, contactDraft = "", responseError = null,
+                    responseSuccessRevision = it.responseSuccessRevision + 1, hasRefreshedResponseContact = false)
+            }
+            // The compatibility callback cannot turn an acknowledged write into a failed submission.
+            try { onSuccess() } catch (error: CancellationException) { throw error } catch (_: Throwable) { }
         }
     }
 
     fun likeReview(review: RolePlayRecruitmentReview) {
-        if (review.id in mutableState.value.likingReviewIds) return
-        viewModelScope.launch {
-            mutableState.update {
-                it.copy(
-                    likingReviewIds = it.likingReviewIds + review.id,
-                    interactionError = null,
-                    error = null,
-                )
-            }
-            try {
-                val result = service.likeRolePlayReview(review.id)
-                mutableState.update { state ->
-                    state.copy(
-                        reviews = state.reviews.map { item ->
-                            if (item.id != review.id) item else {
-                                val nextLiked = result == 1
-                                val delta = if (nextLiked == item.isLiked) 0 else if (nextLiked) 1 else -1
-                                item.copy(
-                                    isLiked = nextLiked,
-                                    likeCount = (item.likeCount + delta).coerceAtLeast(0),
-                                )
-                            }
-                        },
-                    )
-                }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                mutableState.update { it.copy(interactionError = error.message, error = error.message) }
-            } finally {
-                mutableState.update { it.copy(likingReviewIds = it.likingReviewIds - review.id) }
+        if (review.id in state.value.likingReviewIds || !requireWrite()) return
+        if (!isRolePlayDetail() || state.value.reviews.none { it.id == review.id }) {
+            setInteractionError(RecruitmentInteractionError.InvalidInput)
+            return
+        }
+        mutableState.update { it.copy(likingReviewIds = it.likingReviewIds + review.id, interactionError = null, error = null) }
+        mutableInteractionState.update { it.copy(interactionError = null) }
+        launchRequest("like:${review.id}", onFailure = ::setInteractionError, onFinish = {
+            mutableState.update { it.copy(likingReviewIds = it.likingReviewIds - review.id) }
+        }) { request ->
+            if (!checkPendingWrite()) return@launchRequest
+            val result = service.likeRolePlayReview(review.id)
+            if (!request.accept() || !checkPendingWrite()) return@launchRequest
+            mutableState.update { current ->
+                current.copy(reviews = current.reviews.map { item ->
+                    if (item.id != review.id) item else {
+                        val liked = result == 1
+                        val delta = if (liked == item.isLiked) 0 else if (liked) 1 else -1
+                        val count = (item.likeCount + delta).coerceAtLeast(0)
+                        confirmedLikes[item.id] = liked to count
+                        item.copy(isLiked = liked, likeCount = count)
+                    }
+                })
             }
         }
     }
 
-    fun loadSubcomments(review: RolePlayRecruitmentReview) {
-        val current = mutableState.value
-        if (current.subcomments[review.id].orEmpty().size >= review.childCount ||
-            review.id in current.loadingSubcommentIds
-        ) return
-        viewModelScope.launch {
-            mutableState.update {
-                it.copy(
-                    loadingSubcommentIds = it.loadingSubcommentIds + review.id,
-                    interactionError = null,
-                )
-            }
-            try {
-                val page = service.fetchRolePlaySubcomments(review.id, 1, maxOf(review.childCount, 10))
-                mutableState.update {
-                    it.copy(subcomments = it.subcomments + (review.id to page.items))
-                }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                mutableState.update { it.copy(interactionError = error.message, error = error.message) }
-            } finally {
-                mutableState.update {
-                    it.copy(loadingSubcommentIds = it.loadingSubcommentIds - review.id)
-                }
+    fun openReviewReplies(review: RolePlayRecruitmentReview) {
+        if (!isRolePlayDetail() || state.value.reviews.none { it.id == review.id }) return
+        mutableInteractionState.update { it.copy(selectedReviewId = review.id) }
+        if (review.id !in interactionState.value.subcommentPages) loadSubcomments(review)
+    }
+
+    fun dismissReviewReplies() {
+        mutableInteractionState.update { it.copy(selectedReviewId = null) }
+    }
+
+    /** Reload the first page; a failed reload retains the confirmed page and replies. */
+    fun loadSubcomments(review: RolePlayRecruitmentReview) = loadSubcommentPage(review.id, append = false)
+
+    fun loadMoreSubcomments(rootId: String) {
+        if (rootId !in interactionState.value.hasMoreSubcommentIds) return
+        loadSubcommentPage(rootId, append = true)
+    }
+
+    private fun loadSubcommentPage(rootId: String, append: Boolean) {
+        if (!isRolePlayDetail() || state.value.reviews.none { it.id == rootId } || rootId in state.value.loadingSubcommentIds) return
+        val nextPage = if (append) (interactionState.value.subcommentPages[rootId] ?: 0) + 1 else 1
+        mutableState.update { it.copy(loadingSubcommentIds = it.loadingSubcommentIds + rootId) }
+        mutableInteractionState.update { it.copy(subcommentErrors = it.subcommentErrors - rootId,
+            subcommentErrorIsPaginationIds = it.subcommentErrorIsPaginationIds - rootId) }
+        launchRequest("sub:$rootId", onFailure = { error ->
+            mutableInteractionState.update { it.copy(subcommentErrors = it.subcommentErrors + (rootId to error),
+                subcommentErrorIsPaginationIds = if (append) it.subcommentErrorIsPaginationIds + rootId else it.subcommentErrorIsPaginationIds - rootId) }
+        }, onFinish = {
+            mutableState.update { it.copy(loadingSubcommentIds = it.loadingSubcommentIds - rootId) }
+        }) { request ->
+            val rich = readSubcommentsWithAuthors(rootId, nextPage, ReviewPageSize)
+            val page = rich.page
+            if (!request.accept()) return@launchRequest
+            val old = if (append) state.value.subcomments[rootId].orEmpty() else emptyList()
+            mutableAuthorState.update { it.copy(subcommentAuthors = it.subcommentAuthors + (rootId to mergeAuthors(
+                if (append) it.subcommentAuthors[rootId].orEmpty() else emptyMap(), old.map { item -> item.id },
+                rich.authorUuids, page.items.map { item -> item.id },
+            ))) }
+            val items = (old + page.items).distinctBy { it.id }
+            val hasMore = page.hasMore && page.items.isNotEmpty() && (!append || items.size > old.size)
+            mutableState.update { it.copy(subcomments = it.subcomments + (rootId to items)) }
+            mutableInteractionState.update {
+                it.copy(subcommentPages = it.subcommentPages + (rootId to page.page),
+                    hasMoreSubcommentIds = if (hasMore) it.hasMoreSubcommentIds + rootId else it.hasMoreSubcommentIds - rootId)
             }
         }
     }
+
+    fun refreshReviews() = loadReviews(append = false)
 
     fun loadMoreReviews() {
-        val current = mutableState.value
-        val id = current.selectedId ?: return
-        if (!current.hasMoreReviews || current.isLoadingMoreReviews) return
-        viewModelScope.launch {
-            mutableState.update { it.copy(isLoadingMoreReviews = true, reviewsError = null) }
-            try {
-                val page = service.fetchRolePlayReviews(id, current.reviewsPage + 1, ReviewPageSize)
-                val nextWithPreviews = attachSubcommentPreviews(page.items)
-                mutableState.update { state ->
-                    if (state.selectedId != id) state else {
-                        val ids = state.reviews.mapTo(mutableSetOf(), RolePlayRecruitmentReview::id)
-                        val next = nextWithPreviews.filterNot { it.id in ids }
-                        state.copy(
-                            reviews = state.reviews + next,
-                            reviewsPage = page.page,
-                            hasMoreReviews = page.hasMore && next.isNotEmpty(),
-                            isLoadingMoreReviews = false,
-                            reviewsError = null,
-                            subcomments = state.subcomments + next.mapNotNull { review ->
-                                review.childPreviewReplies.takeIf(List<RolePlayRecruitmentSubcomment>::isNotEmpty)
-                                    ?.let { review.id to it }
-                            }.toMap(),
-                        )
+        val current = state.value
+        if (!current.hasMoreReviews || current.isLoadingReviews || current.isLoadingMoreReviews) return
+        loadReviews(append = true)
+    }
+
+    private fun loadReviews(append: Boolean) {
+        if (!isRolePlayDetail()) return
+        val requested = state.value
+        val id = requireNotNull(requested.selectedId)
+        val order = browsingState.value.reviewOrder
+        mutableState.update { it.copy(isLoadingReviews = !append, isLoadingMoreReviews = append, reviewsError = null) }
+        mutableInteractionState.update { it.copy(reviewsErrorIsPagination = false) }
+        launchRequest("reviews", onFailure = { error ->
+            mutableState.update { it.copy(reviewsError = error.name) }
+            mutableInteractionState.update { it.copy(reviewsErrorIsPagination = append) }
+        }, onFinish = {
+            mutableState.update { it.copy(isLoadingReviews = false, isLoadingMoreReviews = false) }
+        }) { request ->
+            val requestedPage = if (append) requested.reviewsPage + 1 else 1
+            val query = RolePlayRecruitmentReviewQuery(id, requestedPage, ReviewPageSize, order)
+            val rich = (service as? RecruitmentAuthorService)?.fetchRolePlayReviewsWithAuthors(query)
+                ?: RolePlayReviewAuthorPage(
+                    if (service is RecruitmentBrowsingService) service.fetchRolePlayReviews(query)
+                    else service.fetchRolePlayReviews(id, requestedPage, ReviewPageSize), emptyMap(),
+                )
+            val page = rich.page
+            if (!request.accept()) return@launchRequest
+            val previews = attachSubcommentPreviews(page.items.distinctBy { it.id })
+            val fetched = previews.reviews
+            if (!request.accept()) return@launchRequest
+            val old = if (append) state.value.reviews else emptyList()
+            val reviews = (old + fetched).distinctBy { it.id }.map { review ->
+                confirmedLikes[review.id]?.let { (liked, count) -> review.copy(isLiked = liked, likeCount = count) } ?: review
+            }
+            val ids = reviews.mapTo(mutableSetOf()) { it.id }
+            mutableAuthorState.update { authors ->
+                val children = authors.subcommentAuthors.filterKeys { it in ids }.toMutableMap()
+                fetched.forEach { review ->
+                    // Existing reply pages win over previews, including pages with no known author.
+                    if (review.id !in state.value.subcomments) {
+                        val candidates = rich.previewAuthorUuids[review.id].orEmpty() + previews.authors[review.id].orEmpty()
+                        val replyIds = review.childPreviewReplies.mapTo(hashSetOf()) { it.id }
+                        children[review.id] = candidates.filterKeys { it in replyIds }
                     }
                 }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                mutableState.update {
-                    it.copy(isLoadingMoreReviews = false, reviewsError = error.message)
-                }
+                authors.copy(reviewAuthors = mergeAuthors(
+                    if (append) authors.reviewAuthors else emptyMap(), old.map { it.id }, rich.authorUuids, page.items.map { it.id },
+                ), subcommentAuthors = children)
             }
+            requests.keys.filter { (it.startsWith("sub:") || it.startsWith("like:")) && it.substringAfter(':') !in ids }
+                .toList().forEach(::cancelRequest)
+            mutableState.update { current ->
+                val replies = current.subcomments.filterKeys { it in ids }.toMutableMap()
+                fetched.forEach { review ->
+                    if (review.id !in replies) replies[review.id] = review.childPreviewReplies
+                }
+                current.copy(reviews = reviews, reviewsPage = page.page,
+                    hasMoreReviews = page.hasMore && page.items.isNotEmpty() && (!append || reviews.size > old.size),
+                    subcomments = replies, loadingSubcommentIds = current.loadingSubcommentIds.intersect(ids),
+                    likingReviewIds = current.likingReviewIds.intersect(ids))
+            }
+            mutableInteractionState.update {
+                it.copy(selectedReviewId = it.selectedReviewId?.takeIf(ids::contains),
+                    subcommentPages = it.subcommentPages.filterKeys(ids::contains),
+                    hasMoreSubcommentIds = it.hasMoreSubcommentIds.intersect(ids),
+                    subcommentErrors = it.subcommentErrors.filterKeys(ids::contains),
+                    subcommentErrorIsPaginationIds = it.subcommentErrorIsPaginationIds.intersect(ids))
+            }
+        }
+    }
+
+    fun refreshMembers() {
+        if (!isRolePlayDetail()) return
+        val id = requireNotNull(state.value.selectedId)
+        mutableState.update { it.copy(isLoadingMembers = true, membersError = null) }
+        launchRequest("members", onFailure = { error -> mutableState.update { it.copy(membersError = error.name) } },
+            onFinish = { mutableState.update { it.copy(isLoadingMembers = false) } }) { request ->
+            val result = service.fetchRolePlayMembers(id)
+            if (request.accept()) mutableState.update { it.copy(members = result) }
+        }
+    }
+
+    fun refreshRating() {
+        if (!isRolePlayDetail()) return
+        val id = requireNotNull(state.value.selectedId)
+        mutableState.update { it.copy(isLoadingRating = true, ratingError = null) }
+        launchRequest("rating", onFailure = { error -> mutableState.update { it.copy(ratingError = error.name) } },
+            onFinish = { mutableState.update { it.copy(isLoadingRating = false) } }) { request ->
+            val result = service.fetchRolePlayRating(id)
+            if (request.accept()) mutableState.update { it.copy(rating = result) }
         }
     }
 
     fun loadCatalogs() {
-        if (mutableState.value.isLoadingCatalogs) return
-        viewModelScope.launch {
-            mutableState.update { it.copy(isLoadingCatalogs = true, catalogsError = null) }
-            try {
-                val catalogs = service.fetchCatalogs()
-                mutableState.update {
-                    it.copy(catalogs = catalogs, isLoadingCatalogs = false, catalogsError = null)
+        if (cleared || state.value.isLoadingCatalogs) return
+        mutableState.update { it.copy(isLoadingCatalogs = true, catalogsError = null) }
+        launchRequest("catalogs", onFailure = { error -> mutableState.update { it.copy(catalogsError = error.name) } },
+            onFinish = { mutableState.update { it.copy(isLoadingCatalogs = false) } }) { request ->
+            if (service is RecruitmentBrowsingService) {
+                val result = service.fetchDutyFilterCatalog()
+                if (request.accept()) {
+                    mutableBrowsingState.update { it.copy(dutyFilterCatalog = result) }
+                    mutableState.update { it.copy(catalogs = result.catalogs) }
                 }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                mutableState.update { it.copy(isLoadingCatalogs = false, catalogsError = error.message) }
+            } else {
+                val result = service.fetchCatalogs()
+                if (request.accept()) mutableState.update { it.copy(catalogs = result) }
             }
         }
     }
 
     fun retryFilterCatalog() {
-        mutableState.value.board.communityKind?.let(::loadFilterCatalog)
+        state.value.board.communityKind?.let(::loadFilterCatalog)
+    }
+
+    private fun loadFilterCatalog(kind: CommunityRecruitmentKind) {
+        if (cleared || state.value.isLoadingFilterCatalog || (kind.requiresAuthentication && !hasCommunityIdentity)) return
+        mutableState.update { it.copy(isLoadingFilterCatalog = true, filterCatalogError = null) }
+        launchRequest("filter", onFailure = { error -> mutableState.update { it.copy(filterCatalogError = error.name) } },
+            onFinish = { mutableState.update { it.copy(isLoadingFilterCatalog = false) } }) { request ->
+            val result = service.fetchCommunityFilterCatalog(kind)
+            if (request.accept()) mutableState.update { it.copy(filterCatalog = result) }
+        }
     }
 
     fun clearResponseError() {
         mutableState.update { it.copy(responseError = null) }
+        mutableInteractionState.update { it.copy(responseError = null) }
     }
 
     fun clearNotice() {
+        mutableState.update { it.copy(error = null, notice = null, interactionError = null) }
+        mutableInteractionState.update { it.copy(interactionError = null) }
+    }
+
+    /** Revoke transient credentials-dependent state; public reads may be retried on this model. */
+    fun clearProtectedContent() {
+        authorizationRevoked = true
+        requests.keys.toList().forEach(::cancelRequest)
+        val selected = state.value.selectedId
+        clearSelection()
+        mutableAuthorState.value = RecruitmentAuthorState()
+        respondedTargets.clear()
+        mutableInteractionState.value = RecruitmentInteractionState()
         mutableState.update {
-            it.copy(
-                error = null,
-                notice = null,
-                interactionError = null,
-            )
+            it.copy(selectedId = selected,
+                communityItems = if (it.board == RecruitmentBoardKind.Guild) emptyList() else it.communityItems.map { summary ->
+                    summary.copy(beginner = summary.beginner?.copy(isResponded = false, recruiterContactInfo = null))
+                },
+                filterCatalog = if (it.board == RecruitmentBoardKind.Guild) CommunityRecruitmentFilterCatalog() else it.filterCatalog,
+                hasMore = if (it.board == RecruitmentBoardKind.Guild) false else it.hasMore,
+                totalCount = if (it.board == RecruitmentBoardKind.Guild) 0 else it.totalCount,
+                isLoading = false, isRefreshing = false, isLoadingMore = false,
+                isLoadingCatalogs = false, isLoadingFilterCatalog = false)
         }
     }
 
-    private fun loadFilterCatalog(kind: CommunityRecruitmentKind) {
-        viewModelScope.launch {
-            mutableState.update {
-                if (it.board.communityKind == kind) it.copy(
-                    isLoadingFilterCatalog = true,
-                    filterCatalogError = null,
-                ) else it
-            }
-            try {
-                val catalog = service.fetchCommunityFilterCatalog(kind)
-                mutableState.update {
-                    if (it.board.communityKind == kind) it.copy(
-                        filterCatalog = catalog,
-                        isLoadingFilterCatalog = false,
-                        filterCatalogError = null,
-                    ) else it
-                }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                mutableState.update {
-                    if (it.board.communityKind == kind) it.copy(
-                        isLoadingFilterCatalog = false,
-                        filterCatalogError = error.message,
-                    ) else it
-                }
-            }
+    override fun onCleared() {
+        clearProtectedContent()
+        cleared = true
+        super.onCleared()
+    }
+
+    private fun validResponseTarget(): Boolean {
+        if (interactionState.value.isCurrentUserAuthor != false) return false
+        val current = state.value
+        val id = current.selectedId ?: return false
+        if ((current.board to id) in respondedTargets) return false
+        return when (current.board) {
+            RecruitmentBoardKind.Duty -> current.dutyDetail?.let { it.summary.id == id && !it.isResponded } == true
+            RecruitmentBoardKind.Beginner -> current.communityDetail?.let {
+                it.summary.id == id && it.summary.kind == CommunityRecruitmentKind.Beginner && it.summary.beginner?.isResponded == false
+            } == true
+            else -> false
         }
     }
 
-    private suspend fun loadRolePlayExtras(id: Int, board: RecruitmentBoardKind) = supervisorScope {
-        mutableState.update {
-            if (it.board == board && it.selectedId == id) it.copy(
-                isLoadingMembers = true,
-                membersError = null,
-                isLoadingReviews = true,
-                reviewsError = null,
-                isLoadingRating = true,
-                ratingError = null,
-            ) else it
-        }
-
-        launch {
-            try {
-                val members = service.fetchRolePlayMembers(id)
-                mutableState.update {
-                    if (it.board == board && it.selectedId == id) it.copy(
-                        members = members,
-                        isLoadingMembers = false,
-                    ) else it
-                }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                mutableState.update {
-                    if (it.board == board && it.selectedId == id) it.copy(
-                        isLoadingMembers = false,
-                        membersError = error.message,
-                    ) else it
-                }
-            }
-        }
-        launch {
-            try {
-                val page = service.fetchRolePlayReviews(id, 1, ReviewPageSize)
-                val reviews = attachSubcommentPreviews(page.items)
-                mutableState.update {
-                    if (it.board == board && it.selectedId == id) it.copy(
-                        reviews = reviews,
-                        reviewsPage = page.page,
-                        hasMoreReviews = page.hasMore,
-                        isLoadingReviews = false,
-                        subcomments = reviews.mapNotNull { review ->
-                            review.childPreviewReplies.takeIf(List<RolePlayRecruitmentSubcomment>::isNotEmpty)
-                                ?.let { review.id to it }
-                        }.toMap(),
-                    ) else it
-                }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                mutableState.update {
-                    if (it.board == board && it.selectedId == id) it.copy(
-                        isLoadingReviews = false,
-                        reviewsError = error.message,
-                    ) else it
-                }
-            }
-        }
-        launch {
-            try {
-                val rating = service.fetchRolePlayRating(id)
-                mutableState.update {
-                    if (it.board == board && it.selectedId == id) it.copy(
-                        rating = rating,
-                        isLoadingRating = false,
-                    ) else it
-                }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                mutableState.update {
-                    if (it.board == board && it.selectedId == id) it.copy(
-                        isLoadingRating = false,
-                        ratingError = error.message,
-                    ) else it
-                }
-            }
-        }
+    private fun isRolePlayDetail(): Boolean = !cleared && state.value.let {
+        it.board == RecruitmentBoardKind.RolePlay && it.selectedId != null &&
+            it.communityDetail?.summary?.kind == CommunityRecruitmentKind.RolePlay &&
+            it.communityDetail.summary.id == it.selectedId
     }
 
-    private suspend fun attachSubcommentPreviews(
-        reviews: List<RolePlayRecruitmentReview>,
-    ): List<RolePlayRecruitmentReview> = supervisorScope {
-        val previews = reviews.filter { it.childCount > 0 }.map { review ->
+    private fun requireWrite(response: Boolean = false): Boolean {
+        if (cleared) return false
+        if (canInteract) return true
+        val error = if (authorizationRevoked) RecruitmentInteractionError.AuthenticationRequired else RecruitmentInteractionError.Unavailable
+        if (response) setResponseError(error) else setInteractionError(error)
+        return false
+    }
+
+    private fun checkPendingWrite(response: Boolean = false): Boolean {
+        if (canInteract) return true
+        clearProtectedContent()
+        if (response) setResponseError(RecruitmentInteractionError.Unavailable)
+        else setInteractionError(RecruitmentInteractionError.Unavailable)
+        return false
+    }
+
+    private fun setResponseError(error: RecruitmentInteractionError) {
+        mutableInteractionState.update { it.copy(responseError = error) }
+        mutableState.update { it.copy(responseError = error.name) }
+    }
+
+    private fun setInteractionError(error: RecruitmentInteractionError) {
+        mutableInteractionState.update { it.copy(interactionError = error) }
+        mutableState.update { it.copy(interactionError = error.name, error = error.name) }
+    }
+
+    private fun confirmRefreshedContact(target: Pair<RecruitmentBoardKind, Int>, contact: String?) {
+        respondedTargets[target] = contact
+        mutableInteractionState.update { it.copy(hasRefreshedResponseContact = true) }
+    }
+
+    private fun CommunityRecruitmentDetail.markResponded(contact: String?): CommunityRecruitmentDetail = copy(
+        summary = summary.copy(beginner = summary.beginner?.copy(isResponded = true, recruiterContactInfo = contact)),
+    )
+
+    private suspend fun readSubcommentsWithAuthors(rootId: String, page: Int, limit: Int): RolePlaySubcommentAuthorPage =
+        (service as? RecruitmentAuthorService)?.fetchRolePlaySubcommentsWithAuthors(rootId, page, limit)
+            ?: RolePlaySubcommentAuthorPage(service.fetchRolePlaySubcomments(rootId, page, limit), emptyMap())
+
+    private data class ReviewPreviews(
+        val reviews: List<RolePlayRecruitmentReview>,
+        val authors: Map<String, Map<String, String>>,
+    )
+
+    private suspend fun attachSubcommentPreviews(reviews: List<RolePlayRecruitmentReview>): ReviewPreviews = supervisorScope {
+        val previews = reviews.filter { it.childCount > 0 && it.id !in state.value.subcomments }.map { review ->
             async {
-                val replies = runCatching {
-                    service.fetchRolePlaySubcomments(review.id, 1, PreviewReplyCount).items
-                }.getOrDefault(emptyList())
+                val replies = try {
+                    readSubcommentsWithAuthors(review.id, 1, PreviewReplyCount)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: DutyRecruitmentException.AuthenticationRequired) {
+                    throw error
+                } catch (_: Throwable) {
+                    null
+                }
                 review.id to replies
             }
         }.awaitAll().toMap()
-        reviews.map { review -> review.copy(childPreviewReplies = previews[review.id].orEmpty()) }
+        ReviewPreviews(
+            reviews.map { review -> review.copy(childPreviewReplies = state.value.subcomments[review.id]
+                ?: previews[review.id]?.page?.items?.distinctBy { it.id } ?: review.childPreviewReplies) },
+            previews.mapValues { it.value?.authorUuids.orEmpty() },
+        )
     }
 
-    private fun currentItemsAreEmpty(): Boolean = mutableState.value.let {
+    private inner class Request(private val key: String, private val revision: Long) {
+        fun isCurrent(): Boolean = !cleared && requests[key] == revision
+        suspend fun accept(): Boolean {
+            currentCoroutineContext().ensureActive()
+            return isCurrent()
+        }
+    }
+
+    private fun launchRequest(
+        key: String,
+        onFailure: (RecruitmentInteractionError) -> Unit,
+        onFinish: () -> Unit,
+        block: suspend (Request) -> Unit,
+    ) {
+        if (cleared) return
+        cancelRequest(key)
+        val revision = ++nextRequest
+        requests[key] = revision
+        val request = Request(key, revision)
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            try {
+                block(request)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                if (request.isCurrent()) {
+                    val type = if (error is DutyRecruitmentException.AuthenticationRequired) {
+                        clearProtectedContent()
+                        RecruitmentInteractionError.AuthenticationRequired
+                    } else RecruitmentInteractionError.Failed
+                    onFailure(type)
+                }
+            } finally {
+                if (request.isCurrent()) {
+                    onFinish()
+                    requests.remove(key)
+                    jobs.remove(key)
+                }
+            }
+        }
+        jobs[key] = job
+        job.start()
+    }
+
+    private fun cancelRequest(key: String) {
+        requests.remove(key)
+        jobs.remove(key)?.cancel()
+    }
+
+    private fun cancelTargetRequests() {
+        requests.keys.filter { it !in setOf("list", "catalogs", "filter") }.toList().forEach(::cancelRequest)
+    }
+
+    private fun currentItemsAreEmpty(): Boolean = state.value.let {
         if (it.board == RecruitmentBoardKind.Duty) it.dutyItems.isEmpty() else it.communityItems.isEmpty()
     }
 
@@ -763,4 +890,11 @@ class DutyRecruitmentViewModelFactory(
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T =
         DutyRecruitmentViewModel(service, autoLoadList) as T
+}
+
+/** First displayed item wins, even when its author was unknown. */
+private fun <K> mergeAuthors(old: Map<K, String>, oldIds: List<K>, incoming: Map<K, String>, incomingIds: List<K>): Map<K, String> {
+    val existing = oldIds.toSet()
+    val valid = incomingIds.toSet()
+    return old + incoming.filter { (id, uuid) -> id !in existing && id in valid && uuid.isNotBlank() }
 }

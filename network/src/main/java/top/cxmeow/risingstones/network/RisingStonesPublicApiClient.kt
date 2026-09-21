@@ -51,6 +51,10 @@ class RisingStonesPublicApiClient(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
+                // A failed write may already have reached the server. Never replay on another host.
+                if (request.method != RisingStonesHttpMethod.Get && request.method != RisingStonesHttpMethod.Head) {
+                    throw RisingStonesEndpointException(error)
+                }
                 lastError = error
             }
         }

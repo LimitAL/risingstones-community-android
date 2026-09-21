@@ -5,7 +5,7 @@ plugins {
 
 val consumerSurface = providers.gradleProperty("risingStonesConsumerSurface")
     .getOrElse("aggregate")
-val consumesComposeApi = consumerSurface == "ui-compose"
+val consumesComposeApi = consumerSurface.endsWith("ui-compose")
 if (consumesComposeApi) {
     pluginManager.apply("org.jetbrains.kotlin.plugin.compose")
 }
@@ -15,13 +15,34 @@ val surfaceArtifacts = mapOf(
     "auth-webview" to listOf("auth-webview"),
     "account-data" to listOf("account-data"),
     "account-presentation" to listOf("account-presentation"),
+    "account-ui-compose" to listOf("account-ui-compose"),
     "forum-domain" to listOf("forum-domain"),
+    "dynamic-data" to listOf("dynamic-data"),
+    "message-data" to listOf("message-data"),
+    "profile-data" to listOf("profile-data"),
+    "guild-data" to listOf("guild-data"),
+    "glamour-data" to listOf("glamour-data"),
+    "recruitment-data" to listOf("recruitment-data"),
+    "personal-data-data" to listOf("personal-data-data"),
     "ui-compose" to listOf("ui-compose"),
+    "forum-ui-compose" to listOf("forum-ui-compose"),
+    "dynamic-ui-compose" to listOf("dynamic-ui-compose"),
+    "message-ui-compose" to listOf("message-ui-compose"),
+    "recruitment-ui-compose" to listOf("recruitment-ui-compose"),
+    "glamour-ui-compose" to listOf("glamour-ui-compose"),
+    "personal-data-ui-compose" to listOf("personal-data-ui-compose"),
+    "guild-ui-compose" to listOf("guild-ui-compose"),
     "aggregate" to listOf(
         "auth-webview",
         "forum-data",
+        "forum-presentation",
+        "recruitment-ui-compose",
+        "dynamic-ui-compose",
+        "message-ui-compose",
+        "profile-ui-compose",
         "glamour-ui-compose",
         "personal-data-ui-compose",
+        "guild-ui-compose",
     ),
 )
 val selectedArtifacts = requireNotNull(surfaceArtifacts[consumerSurface]) {

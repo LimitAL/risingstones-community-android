@@ -167,7 +167,7 @@ class GlamourApiServiceTest {
         assertEquals("1", create.form()["is_public"])
         val delete = transport.requests.first { it.url.toHttpUrl().encodedPath.endsWith("/deleteFavorites") }
         assertEquals(RisingStonesHttpMethod.Delete, delete.method)
-        assertEquals("{\"id\":\"9\"}", requireNotNull(delete.body).decodeToString())
+        assertEquals("id=9", requireNotNull(delete.body).decodeToString())
         val favorite = transport.requests.first { it.url.toHttpUrl().encodedPath.endsWith("/favorite") }
         assertEquals("7", favorite.form()["favorite_id"])
         assertEquals("42", favorite.form()["id"])
@@ -215,6 +215,50 @@ class GlamourApiServiceTest {
         val cancel = transport.requests.first { it.url.toHttpUrl().encodedPath.endsWith("/cancelFollow") }
         assertEquals(RisingStonesHttpMethod.Put, cancel.method)
         assertEquals("{\"follow_uuid\":\"author-1\"}", requireNotNull(cancel.body).decodeToString())
+    }
+
+    @Test
+    fun profileAndDetailRecognizeFollowingAndMutualRelationshipStates() = runBlocking {
+        val transport = GlamourTransport()
+        val service = service(transport)
+        for ((relation, expectedFollowing) in mapOf(0 to false, 1 to false, 2 to true, 3 to true)) {
+            for (encodedRelation in listOf(relation.toString(), "\"$relation\"")) {
+                transport.responses["getUserInfo"] = AUTHOR_PROFILE.replace("\"relation\":\"2\"", "\"relation\":$encodedRelation")
+                transport.responses["glamourDetail"] = DETAIL.replace("\"relation\":\"2\"", "\"relation\":$encodedRelation")
+                val profile = service.fetchAuthorProfile("author-1")
+                assertEquals(relation, profile.relation)
+                assertEquals(expectedFollowing, profile.isFollowing)
+                assertEquals(expectedFollowing, service.fetchDetail(42).isFollowingAuthor)
+            }
+        }
+        assertTrue(transport.requests.all { it.method == RisingStonesHttpMethod.Get })
+    }
+
+    @Test
+    fun authorProfilePreservesCamelCaseAndLegacySnakeCaseFields() = runBlocking {
+        val transport = GlamourTransport()
+        val service = service(transport)
+        val camel = """
+            {"code":10000,"data":{
+              "uuid":"author-1","characterName":"Hero","areaName":"World","groupName":"DC",
+              "avatar":"https://cdn.test/avatar.jpg","profile":"A glamour profile",
+              "followFansiNum":{"followNum":"12","fansNum":34},"relation":"2"
+            }}
+        """.trimIndent()
+        val nestedCamel = camel.replace("\"characterName\":\"Hero\"", "\"characterDetail\":[{\"characterName\":\"Hero\"}]")
+        for (payload in listOf(AUTHOR_PROFILE, camel, nestedCamel)) {
+            transport.responses["getUserInfo"] = payload
+            val profile = service.fetchAuthorProfile("author-1")
+            assertEquals("author-1", profile.author.id)
+            assertEquals("Hero", profile.author.characterName)
+            assertEquals("World", profile.author.areaName)
+            assertEquals("DC", profile.author.groupName)
+            assertEquals("https://cdn.test/avatar.jpg", profile.author.avatarUrl)
+            assertEquals("A glamour profile", profile.profile)
+            assertEquals(12, profile.followingCount)
+            assertEquals(34, profile.followerCount)
+            assertTrue(profile.isFollowing)
+        }
     }
 
     @Test
@@ -280,11 +324,12 @@ private fun authorizer(
 
 private class GlamourTransport : RisingStonesHttpClient {
     val requests = mutableListOf<RisingStonesHttpRequest>()
+    val responses = mutableMapOf<String, String>()
 
     override suspend fun execute(request: RisingStonesHttpRequest): RisingStonesHttpResponse {
         requests += request
         val path = request.url.toHttpUrl().encodedPath
-        val body = when {
+        val body = responses[path.substringAfterLast('/')] ?: when {
             path.endsWith("/myFavoritesList") -> FOLDERS
             path.endsWith("/glamourDetail") -> DETAIL
             path.endsWith("/like") -> """{"code":10000,"data":"1"}"""

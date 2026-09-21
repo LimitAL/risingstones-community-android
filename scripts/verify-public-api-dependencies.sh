@@ -36,7 +36,7 @@ require_api_dependency auth-webview 'project(":network")'
 require_api_dependency forum-domain 'project(":core")'
 require_api_dependency forum-domain "libs.kotlinx.coroutines.core"
 
-features=(account forum glamour personal-data recruitment)
+features=(account forum glamour personal-data recruitment dynamic message profile guild)
 for feature in "${features[@]}"; do
   data_module="$feature-data"
   presentation_module="$feature-presentation"
@@ -66,4 +66,8 @@ require_api_dependency ui-compose 'project(":auth-webview")'
 require_api_dependency ui-compose "platform(libs.androidx.compose.bom)"
 require_api_dependency ui-compose "libs.androidx.compose.ui"
 
-echo "Public API dependency declarations verified for 24 Maven library modules"
+public_module_count="$(
+  sed -nE 's/^include\(":(.+)"\)$/\1/p' settings.gradle.kts |
+    awk '$0 != "app" { count++ } END { print count + 0 }'
+)"
+echo "Public API dependency declarations verified for $public_module_count Maven library modules"

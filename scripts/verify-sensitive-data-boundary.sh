@@ -7,6 +7,8 @@ cd "$root"
 manifest="app/src/main/AndroidManifest.xml"
 extraction_rules="app/src/main/res/xml/data_extraction_rules.xml"
 legacy_rules="app/src/main/res/xml/backup_rules.xml"
+share_paths="app/src/main/res/xml/share_paths.xml"
+share_controller="app/src/main/java/top/cxmeow/risingstones/app/PngShareController.kt"
 
 required_manifest_attributes=(
   'android:allowBackup="false"'
@@ -20,6 +22,57 @@ for attribute in "${required_manifest_attributes[@]}"; do
     exit 1
   fi
 done
+
+if [[ "$(grep -Fc '<provider' "$manifest")" -ne 1 ]] ||
+  ! grep -Fq 'android:name=".PngShareFileProvider"' "$manifest" ||
+  ! grep -Fq 'android:authorities="${applicationId}.share"' "$manifest" ||
+  ! grep -Fq 'android:exported="false"' "$manifest" ||
+  ! grep -Fq 'android:grantUriPermissions="true"' "$manifest" ||
+  ! grep -Fq 'android:name="android.support.FILE_PROVIDER_PATHS"' "$manifest" ||
+  ! grep -Fq 'android:resource="@xml/share_paths"' "$manifest"; then
+  echo "The PNG share provider must be the single non-exported, URI-granting app provider" >&2
+  exit 1
+fi
+
+if [[ "$(grep -Fc '<cache-path' "$share_paths")" -ne 1 ]] ||
+  ! grep -Fq 'name="shared_png"' "$share_paths" ||
+  ! grep -Fq 'path="share/"' "$share_paths" ||
+  grep -n -E '<(root-path|files-path|external-path|external-files-path|external-cache-path|media-path)' "$share_paths"; then
+  echo "PNG sharing must expose only the private cacheDir/share directory" >&2
+  exit 1
+fi
+
+if grep -R -n -E \
+  --include='AndroidManifest.xml' \
+  --exclude-dir=build \
+  'android\.permission\.(READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE|READ_MEDIA_[A-Z_]+|MANAGE_EXTERNAL_STORAGE)' \
+  .; then
+  echo "PNG sharing must not request storage or media permissions" >&2
+  exit 1
+fi
+
+required_share_controller_fragments=(
+  'AtomicFile('
+  'FileProvider.getUriForFile'
+  'Intent.ACTION_SEND'
+  'Intent.EXTRA_STREAM'
+  'ClipData.newRawUri'
+  'Intent.FLAG_GRANT_READ_URI_PERMISSION'
+  'revokeUriPermission'
+  'ShareDirectoryName = "share"'
+  'mode != "r"'
+  'clearRegisteredUrisForTesting'
+)
+for fragment in "${required_share_controller_fragments[@]}"; do
+  if ! grep -Fq "$fragment" "$share_controller"; then
+    echo "PNG share controller is missing required private, read-only behavior: $fragment" >&2
+    exit 1
+  fi
+done
+if grep -n -E 'ACTION_SEND_MULTIPLE|FLAG_GRANT_WRITE_URI_PERMISSION|externalCacheDir|externalFilesDir|filesDir|Uri\.fromFile' "$share_controller"; then
+  echo "PNG sharing must not expose multiple, writable, external, or file:// URIs" >&2
+  exit 1
+fi
 
 domains=(
   root

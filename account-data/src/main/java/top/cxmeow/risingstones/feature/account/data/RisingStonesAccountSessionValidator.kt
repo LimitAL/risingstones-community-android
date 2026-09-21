@@ -14,6 +14,7 @@ import top.cxmeow.risingstones.core.auth.RisingStonesRequestContext
 import top.cxmeow.risingstones.network.RisingStonesApiException
 import top.cxmeow.risingstones.network.RisingStonesApiRequest
 import top.cxmeow.risingstones.network.RisingStonesPublicApiClient
+import top.cxmeow.risingstones.network.RisingStonesResponsePolicy
 import top.cxmeow.risingstones.network.RisingStonesSessionValidation
 import top.cxmeow.risingstones.network.RisingStonesSessionValidator
 
@@ -51,15 +52,18 @@ class RisingStonesAccountSessionValidator(
             ).body.decodeToString(),
         ).jsonObject
         val code = response.intValue("code")
-        if (code != 10000) {
+        if (!RisingStonesResponsePolicy.accepts(code)) {
             throw RisingStonesApiException(
                 message = response.stringValue("msg", "message")
                     ?: "Rising Stones account-read validation failed",
                 code = code,
             )
         }
-        val displayName = response.objectValue("data")
-            ?.firstNestedString(setOf("character_name", "characterName"))
+        val data = response.objectValue("data") ?: throw RisingStonesApiException(
+            message = "Rising Stones account-read validation payload is missing",
+            code = code,
+        )
+        val displayName = data.firstNestedString(setOf("character_name", "characterName"))
             ?: base.displayName
         return base.copy(
             displayName = displayName,

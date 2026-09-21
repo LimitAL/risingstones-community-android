@@ -41,6 +41,7 @@ required_files=(
   scripts/verify-string-localizations.sh
   settings.gradle.kts
   scripts/test-public-source-safety-gate.sh
+  scripts/test-sensitive-data-boundary-gate.sh
 )
 
 for path in "${required_files[@]}"; do
@@ -57,6 +58,7 @@ bash scripts/verify-public-documentation.sh
 bash scripts/verify-public-source-safety.sh
 bash scripts/test-public-source-safety-gate.sh
 bash scripts/verify-sensitive-data-boundary.sh
+bash scripts/test-sensitive-data-boundary-gate.sh
 bash scripts/verify-string-localizations.sh
 
 settings_modules="$(

@@ -28,4 +28,9 @@
     <string name="rising_stones_capability_personal_data">個人資料中心</string>
     <string name="rising_stones_copy_capability_report">複製去識別報告</string>
     <string name="rising_stones_capability_report_copied">已複製去識別報告</string>
+    <string name="rising_stones_capability_dynamic_read">社群動態</string>
+    <string name="rising_stones_capability_message_read">訊息讀取</string>
+    <string name="rising_stones_capability_guild_read">我的部隊與相簿</string>
+    <string name="rising_stones_capability_guild_write">部隊互動</string>
+    <string name="rising_stones_capability_guild_image_upload">部隊圖片上傳</string>
 </resources>

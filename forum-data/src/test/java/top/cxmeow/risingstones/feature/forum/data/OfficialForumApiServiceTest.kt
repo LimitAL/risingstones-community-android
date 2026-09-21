@@ -3,6 +3,10 @@ package top.cxmeow.risingstones.feature.forum.data
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.async
 import kotlinx.coroutines.yield
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -67,15 +71,15 @@ class OfficialForumApiServiceTest {
 
         assertEquals(2, transport.requests.size)
         assertEquals(RisingStonesHttpMethod.Get, transport.requests[0].method)
-        assertEquals("posts", transport.requests[0].url.toHttpUrl().queryParameter("channel"))
+        assertEquals("default", transport.requests[0].url.toHttpUrl().queryParameter("channel"))
         assertEquals(RisingStonesHttpMethod.Put, transport.requests[1].method)
-        assertEquals("https://ff14risingstones.gcloud.com.cn", transport.requests[1].url.substringBefore("/posts/"))
+        assertEquals("https://ff14risingstones.gcloud.com.cn", transport.requests[1].url.toHttpUrl().let { "${it.scheme}://${it.host}" })
         assertEquals("image/png", transport.requests[1].headers["Content-Type"])
         assertEquals("5", transport.requests[1].headers["Content-Length"])
         assertEquals("session-token", transport.requests[1].headers["x-cos-security-token"])
         assertEquals(byteArrayOf(0, 1, 2, 3, 4).toList(), transport.requests[1].body?.toList())
         assertTrue(transport.requests[1].headers["Authorization"].orEmpty().contains("q-sign-algorithm=sha1"))
-        assertTrue(url.startsWith("https://ff14risingstones.gcloud.com.cn/posts/"))
+        assertTrue(url.startsWith("https://ff14risingstones.gcloud.com.cn/default/"))
     }
 
     @Test
@@ -151,6 +155,23 @@ class OfficialForumApiServiceTest {
     }
 
     @Test
+    fun voteDisplayAndSelectionTypesRemainIndependentInTheDtoMapping() = runBlocking {
+        for (displayType in listOf(1, 2)) {
+            for (selectionType in listOf(1, 2)) {
+                val payload = DETAIL
+                    .replace("\"vote_type\":2", "\"vote_type\":$displayType")
+                    .replace("\"vote_type\":\"2\"", "\"vote_type\":\"$displayType\"")
+                    .replace("\"option_id\":", "\"option_type\":$selectionType,\"option_id\":")
+                val vote = service(OfficialForumTransport(detailBody = payload)).fetchPostDetail(42).votes.single()
+                assertEquals(displayType, vote.type)
+                assertEquals(listOf(selectionType, selectionType), vote.options.map { it.type })
+                assertEquals(selectionType == 2, vote.allowsMultipleSelection)
+                assertEquals(2, vote.maximumSelectionCount)
+            }
+        }
+    }
+
+    @Test
     fun writesRequireRisingStonesCredentialAndUseExactFormFields() = runBlocking {
         val unauthenticated = service(OfficialForumTransport())
         assertThrows(OfficialForumException.AuthenticationRequired::class.java) {
@@ -197,7 +218,7 @@ class OfficialForumApiServiceTest {
     }
 
     @Test
-    fun deleteCommentSendsJsonBodyOverDeleteWithCredential() = runBlocking {
+    fun deleteCommentSendsFormBodyOverDeleteWithCredential() = runBlocking {
         val unauthenticated = service(OfficialForumTransport())
         assertThrows(OfficialForumException.AuthenticationRequired::class.java) {
             runBlocking { unauthenticated.deleteComment(2139818) }
@@ -210,8 +231,8 @@ class OfficialForumApiServiceTest {
         val request = transport.requests.single()
         assertEquals(RisingStonesHttpMethod.Delete, request.method)
         assertEquals("host token", request.headers["Authorization"])
-        assertEquals("application/json; charset=utf-8", request.contentType)
-        assertEquals("{\"comment_id\":\"2139818\"}", requireNotNull(request.body).decodeToString())
+        assertEquals("application/x-www-form-urlencoded; charset=utf-8", request.contentType)
+        assertEquals("comment_id=2139818", requireNotNull(request.body).decodeToString())
     }
 
     @Test
@@ -270,6 +291,94 @@ class OfficialForumApiServiceTest {
         assertEquals(1, provider.reclaimCount)
     }
 
+    @Test
+    fun acceptedCodesPreserveReadPayloadsWithoutRefreshingForContradictoryMessages() = runBlocking {
+        for (code in listOf(10000, 10002)) {
+            val transport = ForumResponseCodeTransport(OfficialForumTransport(), code)
+            val provider = ForumResponseCodeCredential()
+            val service = service(transport, provider)
+            assertEquals(2, service.fetchParts().size)
+            assertEquals(42, service.fetchPosts(OfficialForumListQuery(OfficialForumContentKind.Post)).items.single().id)
+            assertEquals(42, service.searchPosts(OfficialForumSearchQuery(OfficialForumContentKind.Post, "Fixture")).items.single().id)
+            assertEquals(42, service.fetchPostDetail(42).id)
+            assertEquals(9, service.fetchComments(OfficialForumCommentQuery(42)).items.single().id)
+            assertEquals(9, service.fetchSubComments(OfficialForumSubCommentQuery(9)).items.single().id)
+            assertEquals(6, transport.requests.size)
+            assertEquals(0, provider.refreshes)
+            assertEquals(0, provider.resolutions)
+        }
+    }
+
+    @Test
+    fun acceptedCodesSubmitEveryForumMutationOnceDespiteContradictoryMessages() = runBlocking {
+        for (code in listOf(10000, 10002)) {
+            val transport = ForumResponseCodeTransport(OfficialForumTransport(), code)
+            val provider = ForumResponseCodeCredential()
+            val service = service(transport, provider)
+            assertEquals(1, service.likePost(42))
+            assertEquals(1, service.likeComment(9))
+            assertEquals(-1, service.starPost(42))
+            assertEquals(listOf(91), service.submitComment(OfficialForumCommentDraft(42, 0, 0, "Fixture", "")))
+            assertEquals(7, service.submitVote(OfficialForumVoteDraft(42, listOf(OfficialForumVoteSelection(2, "Fixture")))).voteTotalUser)
+            service.deleteComment(9)
+            assertEquals(listOf("like", "like", "star", "comment", "vote", "deleteComment"),
+                transport.requests.map { it.url.toHttpUrl().pathSegments.last() })
+            assertEquals(List(5) { RisingStonesHttpMethod.Post } + RisingStonesHttpMethod.Delete,
+                transport.requests.map { it.method })
+            assertEquals(0, provider.refreshes)
+            assertEquals(0, provider.resolutions)
+        }
+    }
+
+    @Test
+    fun acceptedTokenCodesUploadOnlyOnceWithoutCredentialRefresh() = runBlocking {
+        for (code in listOf(10000, 10002)) {
+            val transport = ForumResponseCodeTransport(ImageUploadTransport(), code)
+            val provider = ForumResponseCodeCredential()
+            service(transport, provider).uploadCommentImage(OfficialForumCommentImageUpload(byteArrayOf(1), "image/png"))
+            assertEquals(listOf(RisingStonesHttpMethod.Get, RisingStonesHttpMethod.Put), transport.requests.map { it.method })
+            assertEquals(0, provider.refreshes)
+            assertEquals(0, provider.resolutions)
+        }
+    }
+
+    @Test
+    fun acceptedCodesStillRequireExistingReadVoteAndTokenPayloads() {
+        for (code in listOf(10000, 10002)) {
+            val transport = ForumResponseCodeTransport(OfficialForumTransport(), code, omitPayload = true)
+            val provider = ForumResponseCodeCredential()
+            val service = service(transport, provider)
+            assertThrows(OfficialForumException.MissingPayload::class.java) { runBlocking { service.fetchParts() } }
+            assertThrows(OfficialForumException.MissingPayload::class.java) {
+                runBlocking { service.fetchPosts(OfficialForumListQuery(OfficialForumContentKind.Post)) }
+            }
+            assertThrows(OfficialForumException.MissingPayload::class.java) { runBlocking { service.fetchPostDetail(42) } }
+            assertThrows(OfficialForumException.MissingPayload::class.java) {
+                runBlocking { service.submitVote(OfficialForumVoteDraft(42, listOf(OfficialForumVoteSelection(2, "Fixture")))) }
+            }
+            assertEquals(4, transport.requests.size)
+            assertEquals(0, provider.refreshes)
+            assertEquals(0, provider.resolutions)
+            val uploadTransport = ForumResponseCodeTransport(ImageUploadTransport(), code, omitPayload = true)
+            assertThrows(OfficialForumException.ImageUploadFailed::class.java) {
+                runBlocking { service(uploadTransport, provider).uploadCommentImage(OfficialForumCommentImageUpload(byteArrayOf(1), "image/png")) }
+            }
+            assertEquals(1, uploadTransport.requests.size)
+        }
+    }
+
+    @Test
+    fun explicitExpiredResponsesStillRefreshOnceThenFail() {
+        val transport = ForumResponseCodeTransport(OfficialForumTransport(), 401)
+        val provider = ForumResponseCodeCredential()
+        assertThrows(OfficialForumException.AuthenticationRequired::class.java) {
+            runBlocking { service(transport, provider).fetchPostDetail(42) }
+        }
+        assertEquals(2, transport.requests.size)
+        assertEquals(1, provider.refreshes)
+        assertEquals(0, provider.resolutions)
+    }
+
     private fun service(
         transport: RisingStonesHttpClient,
         sessionProvider: RisingStonesSessionProvider? = null,
@@ -277,6 +386,36 @@ class OfficialForumApiServiceTest {
         RisingStonesPublicApiClient(transport, listOf("https://rising.test")),
         sessionProvider,
     )
+}
+
+private class ForumResponseCodeCredential : RisingStonesSessionProvider, OfficialForumIdentityConflictHandler {
+    override val capabilities = RisingStonesCapability.entries.toSet()
+    override val identityConflictState = MutableStateFlow(OfficialForumIdentityConflictState())
+    var refreshes = 0
+    var resolutions = 0
+    override suspend fun currentAuthorizer() = authorizer("User-Agent" to "fixture-paired-agent")
+    override suspend fun refreshAuthorizer(): RisingStonesRequestAuthorizer { refreshes++; return currentAuthorizer() }
+    override suspend fun awaitIdentityConflictResolution(): RisingStonesRequestAuthorizer { resolutions++; return currentAuthorizer() }
+    override suspend fun reclaimIdentityConflict() = Unit
+    override suspend fun cancelIdentityConflict() = Unit
+}
+
+private class ForumResponseCodeTransport(
+    private val delegate: RisingStonesHttpClient,
+    private val code: Int,
+    private val omitPayload: Boolean = false,
+) : RisingStonesHttpClient {
+    val requests = mutableListOf<RisingStonesHttpRequest>()
+    override suspend fun execute(request: RisingStonesHttpRequest): RisingStonesHttpResponse {
+        requests += request
+        val response = delegate.execute(request)
+        if (request.method == RisingStonesHttpMethod.Put) return response
+        val body = Json.parseToJsonElement(response.body.decodeToString()).jsonObject.toMutableMap()
+        body["code"] = JsonPrimitive(code)
+        body["msg"] = JsonPrimitive("未登录 session expired")
+        if (omitPayload) body.remove("data")
+        return response.copy(body = JsonObject(body).toString().encodeToByteArray())
+    }
 }
 
 private object TestCredentialProvider : RisingStonesSessionProvider {
@@ -331,7 +470,7 @@ private fun authorizer(
     headers.forEach { (name, value) -> sink.set(name, value) }
 }
 
-private class RefreshingOfficialForumTransport(private val conflictCode: Int = 10002) : RisingStonesHttpClient {
+private class RefreshingOfficialForumTransport(private val conflictCode: Int = 401) : RisingStonesHttpClient {
     val authorizationHeaders = mutableListOf<String?>()
 
     override suspend fun execute(request: RisingStonesHttpRequest): RisingStonesHttpResponse {
@@ -391,7 +530,7 @@ private class ImageUploadTransport : RisingStonesHttpClient {
         return RisingStonesHttpResponse(
             200,
             emptyMap(),
-            """{"code":10002,"data":{"credentials":{"sessionToken":"session-token","tmpSecretId":"AKIDTEST","tmpSecretKey":"test-secret"},"startTime":${now - 5},"expiredTime":${now + 60},"keyDir":"posts/test"}}""".encodeToByteArray(),
+            """{"code":10002,"data":{"credentials":{"sessionToken":"session-token","tmpSecretId":"AKIDTEST","tmpSecretKey":"test-secret"},"startTime":${now - 5},"expiredTime":${now + 60},"keyDir":"default/test"}}""".encodeToByteArray(),
         )
     }
 }

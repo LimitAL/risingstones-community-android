@@ -16,6 +16,7 @@ import top.cxmeow.risingstones.core.auth.RisingStonesRequestContext
 import top.cxmeow.risingstones.network.RisingStonesApiQueryItem
 import top.cxmeow.risingstones.network.RisingStonesApiRequest
 import top.cxmeow.risingstones.network.RisingStonesPublicApiClient
+import top.cxmeow.risingstones.network.RisingStonesResponsePolicy
 import top.cxmeow.risingstones.network.RisingStonesSessionValidation
 import top.cxmeow.risingstones.network.RisingStonesSessionValidator
 
@@ -82,7 +83,7 @@ class RisingStonesPersonalDataSessionValidator(
                 ),
             ).body.decodeToString(),
         ).jsonObject
-        check(response.intValue("code") == 10000)
+        check(RisingStonesResponsePolicy.accepts(response.intValue("code")))
         return response
     }
 }

@@ -12,6 +12,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import java.time.Instant
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourAccessorySearchResult
@@ -68,6 +70,30 @@ class RisingStonesGlamourScreenTest {
         composeRule.onNodeWithText("Detail description").assertExists()
     }
 
+
+    @Test fun compactStandaloneDetailReturnsToCaller() = standaloneDetail(599)
+    @Test fun mediumStandaloneDetailReturnsToCaller() = standaloneDetail(600)
+    @Test fun upperMediumStandaloneDetailReturnsToCaller() = standaloneDetail(839)
+    @Test fun expandedStandaloneDetailReturnsToCaller() = standaloneDetail(840)
+
+    private fun standaloneDetail(width: Int) {
+        var loadedId: Int? = null
+        var returned = false
+        val service = object : GlamourService by FakeGlamourService {
+            override suspend fun fetchDetail(id: Int) = FakeGlamourService.fetchDetail(id).also { loadedId = id }
+        }
+        composeRule.setContent { MaterialTheme {
+            Box(Modifier.width(width.dp).height(1000.dp)) {
+                RisingStonesGlamourDetailScreen(service, 42, { returned = true })
+            }
+        } }
+        waitFor("Detail description")
+        assertEquals(42, loadedId)
+        composeRule.onNodeWithText("List excerpt", substring = true).assertDoesNotExist()
+        composeRule.onNodeWithText("Back").performClick()
+        assertTrue(returned)
+    }
+
     private fun showAtWidth(width: Dp) {
         composeRule.setContent {
             MaterialTheme {
@@ -92,7 +118,7 @@ class RisingStonesGlamourScreenTest {
     }
 }
 
-private object FakeGlamourService : GlamourService {
+internal object FakeGlamourService : GlamourService {
     override val hasCommunityIdentity = true
 
     override suspend fun fetchGlamours(request: GlamourListRequest) =

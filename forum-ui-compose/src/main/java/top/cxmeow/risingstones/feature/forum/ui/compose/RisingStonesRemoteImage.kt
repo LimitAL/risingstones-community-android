@@ -60,7 +60,7 @@ private sealed interface RemoteImageState {
     data class Loaded(val image: ImageBitmap) : RemoteImageState
 }
 
-private object RisingStonesForumImageLoader {
+internal object RisingStonesForumImageLoader {
     private const val MaxResponseBytes = 12L * 1024L * 1024L
     private const val MaxDecodedDimension = 1600
     private val memory = LruCache<String, ImageBitmap>(64)

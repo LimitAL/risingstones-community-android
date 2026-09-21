@@ -15,3 +15,9 @@ fun accountServiceFromPublishedArtifact(
     sessionProvider = sessionProvider,
     json = json,
 )
+
+fun accountActionVerificationFromPublishedArtifact(
+    client: RisingStonesPublicApiClient,
+    provider: RisingStonesSessionProvider,
+): top.cxmeow.risingstones.feature.account.domain.RisingStonesAccountActionVerificationService =
+    RisingStonesAccountApiService(client, provider)

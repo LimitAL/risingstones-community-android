@@ -28,4 +28,9 @@
     <string name="rising_stones_capability_personal_data">Personal data center</string>
     <string name="rising_stones_copy_capability_report">Copy sanitized report</string>
     <string name="rising_stones_capability_report_copied">Sanitized report copied</string>
+    <string name="rising_stones_capability_dynamic_read">Community activity</string>
+    <string name="rising_stones_capability_message_read">Messages</string>
+    <string name="rising_stones_capability_guild_read">Free company and photos</string>
+    <string name="rising_stones_capability_guild_write">Free company interactions</string>
+    <string name="rising_stones_capability_guild_image_upload">Free company image upload</string>
 </resources>

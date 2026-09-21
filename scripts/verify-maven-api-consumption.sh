@@ -10,8 +10,23 @@ isolated_surfaces=(
   auth-webview
   account-data
   account-presentation
+  account-ui-compose
   forum-domain
+  dynamic-data
+  message-data
+  profile-data
+  guild-data
+  glamour-data
+  recruitment-data
+  personal-data-data
   ui-compose
+  forum-ui-compose
+  dynamic-ui-compose
+  message-ui-compose
+  recruitment-ui-compose
+  glamour-ui-compose
+  personal-data-ui-compose
+  guild-ui-compose
 )
 
 if [[ -z "$version" ]]; then

@@ -1,5 +1,7 @@
 package top.cxmeow.risingstones.feature.personaldata.data
 
+import java.math.BigDecimal
+import java.math.RoundingMode
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
@@ -8,6 +10,8 @@ import java.time.format.DateTimeFormatter
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.supervisorScope
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -20,12 +24,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
-import top.cxmeow.risingstones.core.auth.RisingStonesAuthenticationRequirement
 import top.cxmeow.risingstones.core.auth.RisingStonesCapability
-import top.cxmeow.risingstones.core.auth.RisingStonesHeaderSink
-import top.cxmeow.risingstones.core.auth.RisingStonesIdentityConflictResolver
-import top.cxmeow.risingstones.core.auth.RisingStonesRequestAuthorizer
-import top.cxmeow.risingstones.core.auth.RisingStonesRequestContext
 import top.cxmeow.risingstones.core.auth.RisingStonesSessionProvider
 import top.cxmeow.risingstones.feature.personaldata.domain.EmptyPersonalDataCatalogProvider
 import top.cxmeow.risingstones.feature.personaldata.domain.FrontlinePeriod
@@ -42,7 +41,24 @@ import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataMetric
 import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataMetricUnit
 import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataOfficialCatalogs
 import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataSection
-import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataService
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataShareImage
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataShareKind
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataShareResourceService
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataPhantomWeaponService
+import top.cxmeow.risingstones.feature.personaldata.domain.PhantomWeaponElement
+import top.cxmeow.risingstones.feature.personaldata.domain.ExplorationException
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataDashboardService
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataDashboardSectionKind
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataFrontlineService
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataFrontlineSection
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataFrontlineCatalogs
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataUltimateService
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataUltimateSection
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataSupplementaryCatalogProvider
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataSupplementaryCatalogs
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataFishingRankingKind
+import top.cxmeow.risingstones.feature.personaldata.domain.ExplorationBoard
+import top.cxmeow.risingstones.feature.personaldata.domain.ExplorationSectionKind
 import top.cxmeow.risingstones.feature.personaldata.domain.UltimateDashboard
 import top.cxmeow.risingstones.feature.personaldata.domain.UltimateDeathPoint
 import top.cxmeow.risingstones.feature.personaldata.domain.UltimateEncounterCatalog
@@ -53,9 +69,10 @@ import top.cxmeow.risingstones.feature.personaldata.domain.UltimatePartnerStatis
 import top.cxmeow.risingstones.feature.personaldata.domain.UltimatePhaseProgress
 import top.cxmeow.risingstones.feature.personaldata.domain.UltimateTeammate
 import top.cxmeow.risingstones.network.RisingStonesApiQueryItem
-import top.cxmeow.risingstones.network.RisingStonesApiRequest
-import top.cxmeow.risingstones.network.RisingStonesHttpException
 import top.cxmeow.risingstones.network.RisingStonesPublicApiClient
+import top.cxmeow.risingstones.feature.personaldata.data.phantomWeaponItemIconUrl as phantomItemIconUrl
+import top.cxmeow.risingstones.feature.personaldata.data.phantomWeaponElementIconUrl as phantomElementIconUrl
+import top.cxmeow.risingstones.feature.personaldata.data.phantomWeaponLensImageUrl as phantomLensImageUrl
 
 class PersonalDataApiService(
     private val risingStonesClient: RisingStonesPublicApiClient,
@@ -63,7 +80,72 @@ class PersonalDataApiService(
     private val catalogProvider: PersonalDataCatalogProvider = EmptyPersonalDataCatalogProvider,
     private val json: Json = Json { ignoreUnknownKeys = true; explicitNulls = false },
     private val temporarySessionId: String = UUID.randomUUID().toString(),
-) : PersonalDataService {
+) : PersonalDataPhantomWeaponService, PersonalDataDashboardService, PersonalDataFrontlineService,
+    PersonalDataUltimateService, PersonalDataShareResourceService {
+    private val reader = PersonalDataRequestReader(risingStonesClient, sessionProvider, json, temporarySessionId)
+    private val exploration = ExplorationApiReader(risingStonesClient, sessionProvider, json)
+    private val reading = PersonalDataReadingApiReader(reader)
+    private val dashboard = PersonalDataDashboardApiReader(reader, reading)
+    private val frontline = PersonalDataFrontlineApiReader(reader)
+    private val ultimate = PersonalDataUltimateApiReader(reader)
+    private val phantomWeaponCatalog = BundledPhantomWeaponCatalogProvider()
+    private val shareCatalog = BundledPersonalDataShareCatalogProvider()
+
+    override suspend fun fetchShareCatalogs() = shareCatalog.fetchShareCatalogs()
+    override fun sharePageUrl(kind: PersonalDataShareKind) = shareCatalog.sharePageUrl(kind)
+    override fun shareImageUrl(image: PersonalDataShareImage) = shareCatalog.shareImageUrl(image)
+
+    override suspend fun fetchPhantomWeaponExploration() = run {
+        requireExplorationAccess()
+        val overview = exploration.overview(ExplorationBoard.OccultCrescent)
+        requireExplorationAccess()
+        phantomWeaponSnapshot(overview).also { requireExplorationAccess() }
+    }
+
+    override suspend fun fetchPhantomWeaponCatalog() = phantomWeaponCatalog.fetchPhantomWeaponCatalog()
+    override fun phantomWeaponItemIconUrl(iconId: Int) = phantomItemIconUrl(iconId)
+    override fun phantomWeaponElementIconUrl(element: PhantomWeaponElement) = phantomElementIconUrl(element)
+    override fun phantomWeaponLensImageUrl(step: Int) = phantomLensImageUrl(step)
+
+    private suspend fun requireExplorationAccess() {
+        currentCoroutineContext().ensureActive()
+        if (!hasCommunityIdentity) throw ExplorationException.Unavailable
+    }
+
+    override suspend fun fetchUltimateRecords() = ultimate.records()
+    override suspend fun fetchUltimateSection(territoryType: Int, section: PersonalDataUltimateSection) = ultimate.section(territoryType, section)
+    override fun ultimateCoverUrl(territoryType: Int) = personalDataUltimateCoverUrl(territoryType)
+    override fun ultimateJobIconUrl(jobName: String) = personalDataUltimateJobIconUrl(jobName)
+    override fun ultimateJobOrder(jobName: String) = personalDataUltimateJobOrder(jobName)
+    override fun ultimateMedalImageUrl(territoryType: Int) = personalDataUltimateMedalImageUrl(territoryType)
+
+    override suspend fun fetchFrontlineSection(section: PersonalDataFrontlineSection) = frontline.fetch(section)
+    override suspend fun fetchFrontlineCatalogs() = PersonalDataFrontlineCatalogs(
+        mapNames = personalDataFrontlineMapNames,
+        achievements = fetchSupplementaryCatalogs().frontlineAchievements,
+    )
+    override fun frontlineJobIconUrl(jobName: String, hollow: Boolean) = personalDataFrontlineJobIconUrl(jobName, hollow)
+    override fun frontlineCompanyFlagUrl(companyName: String) = personalDataFrontlineGrandCompanyImageUrl(companyName)
+    override fun frontlineAchievementImageUrl() = personalDataFrontlineAchievementImageUrl()
+
+    override suspend fun fetchDashboardSection(section: PersonalDataDashboardSectionKind) = dashboard.fetch(section)
+    override suspend fun fetchSupplementaryCatalogs() =
+        (catalogProvider as? PersonalDataSupplementaryCatalogProvider)?.fetchSupplementaryCatalogs()
+            ?: PersonalDataSupplementaryCatalogs()
+    override suspend fun fetchFishingRanking(kind: PersonalDataFishingRankingKind) = reading.fishingRanking(kind)
+    override suspend fun fetchRaceUsage() = reading.raceUsage()
+    override suspend fun fetchGlamourSetRecords() = reading.glamourSetRecords()
+    override fun itemIconUrl(iconId: Int) = personalDataItemIconUrl(iconId)
+    override fun achievementIconUrl(iconId: Int) = personalDataAchievementIconUrl(iconId)
+    override fun raidImageUrl(imageId: Int) = personalDataRaidImageUrl(imageId)
+
+    override suspend fun fetchExplorationOverview(board: ExplorationBoard) =
+        exploration.overview(board)
+
+    override suspend fun fetchExplorationHistory(
+        board: ExplorationBoard,
+        section: ExplorationSectionKind,
+    ) = exploration.history(board, section)
     override val hasCommunityIdentity: Boolean
         get() = RisingStonesCapability.PersonalData in sessionProvider.capabilities
 
@@ -93,7 +175,7 @@ class PersonalDataApiService(
             val summaryTask = async { rising(definition.summaryPath).element("data") ?: JsonNull }
             val sectionTasks = definition.sections.map { section ->
                 section to async {
-                    runCatching {
+                    sectionResult {
                         val data = rising(section.path).element("data") ?: JsonNull
                         section(data, section.id)
                     }
@@ -110,17 +192,18 @@ class PersonalDataApiService(
             } else emptyList()
             val summary = when (board) {
                 PersonalDataBoard.Frontline -> periods.firstOrNull { it.kind == FrontlinePeriodKind.Total }?.metrics
-                    ?: metrics(summaryRows.firstOrNull().orEmpty(), definition.metrics)
-                PersonalDataBoard.Savage, PersonalDataBoard.Glamour -> aggregateMetrics(summaryRows, definition.metrics)
+                    ?: emptyList()
                 else -> metrics(summaryRows.firstOrNull().orEmpty(), definition.metrics)
             }
+            currentCoroutineContext().ensureActive()
+            if (!hasCommunityIdentity) throw PersonalDataException.AuthenticationRequired
             PersonalDataBoardContent(
                 board = board,
                 metrics = summary,
                 sections = sectionTasks.map { (definition, task) ->
                     task.await().fold(
                         onSuccess = { it },
-                        onFailure = { PersonalDataSection(definition.id, error = it.message ?: it.toString()) },
+                        onFailure = { PersonalDataSection(definition.id, error = "load_failed") },
                     )
                 },
                 frontlinePeriods = periods,
@@ -156,6 +239,8 @@ class PersonalDataApiService(
         val phasesResult = phases.await()
         val deathsResult = deaths.await()
         val results = listOf(teamResult, jobsResult, partnersResult, phasesResult, deathsResult)
+        currentCoroutineContext().ensureActive()
+        if (!hasCommunityIdentity) throw PersonalDataException.AuthenticationRequired
         UltimateEncounterDetail(
             summary,
             teamResult.value.orEmpty(),
@@ -163,7 +248,7 @@ class PersonalDataApiService(
             partnersResult.value.orEmpty(),
             phasesResult.value.orEmpty(),
             deathsResult.value.orEmpty(),
-            results.mapNotNull { it.error?.let { error -> it.key to (error.message ?: error.toString()) } }.toMap(),
+            results.mapNotNull { it.error?.let { error -> it.key to "load_failed" } }.toMap(),
         )
     }
 
@@ -178,69 +263,33 @@ class PersonalDataApiService(
         key: String,
         block: suspend () -> T,
     ) = async {
-        runCatching { block() }.fold(
+        sectionResult { block() }.fold(
             { SectionResult(key, it, null) },
             { SectionResult<T>(key, null, it) },
         )
     }
 
-    private suspend fun rising(path: String, extraQuery: List<RisingStonesApiQueryItem> = emptyList()): JsonObject {
-        val capability = RisingStonesCapability.PersonalData
-        val initial = if (capability in sessionProvider.capabilities) {
-            sessionProvider.currentAuthorizer()
-        } else {
-            null
-        } ?: throw PersonalDataException.AuthenticationRequired
-        val request = RisingStonesApiRequest(
-            path = path,
-            query = extraQuery + q("tempsuid", temporarySessionId),
-        )
-        suspend fun execute(authorizer: RisingStonesRequestAuthorizer): JsonObject {
-            val headers = mutableMapOf<String, String>()
-            authorizer.authorize(
-                RisingStonesRequestContext(
-                    path = path,
-                    requirement = RisingStonesAuthenticationRequirement.Required,
-                    capability = capability,
-                ),
-                RisingStonesHeaderSink(headers::set),
-            )
-            return json.parseToJsonElement(
-                risingStonesClient.execute(request.copy(headers = request.headers + headers)).body.decodeToString(),
-            ).jsonObject
-        }
-        var response = try {
-            execute(initial)
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Throwable) {
-            when {
-                error.isIdentityConflict() -> execute(
-                    (sessionProvider as? RisingStonesIdentityConflictResolver)
-                        ?.awaitIdentityConflictResolution() ?: throw error,
-                )
-                error.isAuthenticationFailure() -> execute(sessionProvider.refreshAuthorizer() ?: throw error)
-                else -> throw error
-            }
-        }
-        if (response.int("code") == 10105) {
-            (sessionProvider as? RisingStonesIdentityConflictResolver)
-                ?.awaitIdentityConflictResolution()
-                ?.let { response = execute(it) }
-        } else if (response.isAuthenticationFailure()) {
-            sessionProvider.refreshAuthorizer()?.let { response = execute(it) }
-        }
-        val code = response.int("code") ?: 0
-        if (code != 10000) throw PersonalDataException.Business(code, response.text("msg", "message"))
-        return response
+    private suspend fun <T> sectionResult(block: suspend () -> T): Result<T> = try {
+        Result.success(block())
+    } catch (cancel: CancellationException) {
+        throw cancel
+    } catch (failure: PersonalDataException.AuthenticationRequired) {
+        throw failure
+    } catch (failure: Exception) {
+        currentCoroutineContext().ensureActive()
+        if (!hasCommunityIdentity) throw PersonalDataException.AuthenticationRequired
+        Result.failure(failure)
     }
+
+    private suspend fun rising(path: String, extraQuery: List<RisingStonesApiQueryItem> = emptyList()): JsonObject =
+        reader.read(path, extraQuery)
 
     private fun section(data: JsonElement, id: String): PersonalDataSection = PersonalDataSection(
         id,
         data.rows().mapIndexed { index, row ->
             PersonalDataEntry(
                 "$id-$index",
-                entryTitleKeys.firstNotNullOfOrNull { row[it]?.scalarText }.orEmpty(),
+                entryTitleKeys.firstNotNullOfOrNull { row[it]?.scalarText?.takeIf(String::isNotBlank) }.orEmpty(),
                 row.flatMap { (key, value) ->
                     if (key in ignoredKeys) emptyList() else value.flatten(key)
                 }.sortedWith(compareBy<PersonalDataField> { it.key != "log_time" }.thenBy { it.key }),
@@ -250,19 +299,15 @@ class PersonalDataApiService(
 
     private fun metrics(row: Map<String, JsonElement>, definitions: List<MetricDefinition>) =
         definitions.mapNotNull { definition ->
-            row[definition.field]?.scalarText?.takeIf(String::isNotBlank)?.let {
-                PersonalDataMetric(definition.field, it, definition.unit)
-            }
-        }
-
-    private fun aggregateMetrics(rows: List<JsonObject>, definitions: List<MetricDefinition>) =
-        definitions.mapNotNull { definition ->
-            val values = rows.mapNotNull { it[definition.field]?.scalarText?.toDoubleOrNull() }
-            if (values.isEmpty()) null else PersonalDataMetric(
-                definition.field,
-                values.sum().let { if (it % 1.0 == 0.0) it.toLong().toString() else it.toString() },
-                definition.unit,
-            )
+            val raw = (row[definition.field] as? JsonPrimitive)?.contentOrNull?.trim()
+                ?.takeIf(String::isNotBlank) ?: return@mapNotNull null
+            val value = when (definition.field) {
+                "gc_id" -> raw // The official value is a Grand Company name, not a numeric id.
+                "win_rate", "succ_rate" -> raw.fixedMetric(scale = 0, multiplier = 100.0)
+                "kda" -> raw.fixedMetric(scale = 2)
+                else -> raw.takeIf { it.toDoubleOrNull()?.isFinite() == true }
+            } ?: return@mapNotNull null
+            PersonalDataMetric(definition.field, value, definition.unit)
         }
 
     private fun ultimateSummary(row: JsonObject): UltimateEncounterSummary? {
@@ -327,7 +372,7 @@ private val definitions = mapOf(
             metric("gc_id"), metric("pvp_rank", PersonalDataMetricUnit.Levels),
             metric("series_level", PersonalDataMetricUnit.Levels), metric("win_times", PersonalDataMetricUnit.Times),
             metric("assist_times", PersonalDataMetricUnit.Times), metric("dead_times", PersonalDataMetricUnit.Times),
-            metric("clear_time"), metric("occupy_count"),
+            metric("clear_time", PersonalDataMetricUnit.Hours), metric("occupy_count"),
             metric("kill_rank"), metric("heal_rank"), metric("damaged_rank"),
             metric("damage_rank"), metric("dead_rank"), metric("assist_rank"),
         ),
@@ -375,8 +420,15 @@ private val ignoredKeys = setOf(
 )
 private val entryTitleKeys = listOf(
     "name", "title", "label", "job_name", "territory_name", "fish_name", "item_name",
-    "map_name", "achievement_name", "log_time",
+    "map_name", "achievement_name", "catalog_name", "Name", "log_time",
 )
+
+private fun String.fixedMetric(scale: Int, multiplier: Double = 1.0): String? {
+    val number = toDoubleOrNull()?.takeIf(Double::isFinite) ?: return null
+    val scaled = (number * multiplier).takeIf(Double::isFinite) ?: return null
+    // JS toFixed rounds the represented binary number, after the official percentage multiplication.
+    return BigDecimal(scaled).setScale(scale, RoundingMode.HALF_UP).toPlainString()
+}
 
 private fun q(name: String, value: Any?) = RisingStonesApiQueryItem(name, value?.toString().orEmpty())
 private fun JsonObject.element(vararg names: String): JsonElement? =
@@ -406,11 +458,13 @@ private val JsonElement.scalarText: String?
     }
 
 private fun JsonElement.rows(): List<JsonObject> = when (this) {
-    is JsonArray -> mapNotNull { it as? JsonObject }
-    is JsonObject -> listOf("rows", "list", "data").firstNotNullOfOrNull { key ->
-        (this[key] as? JsonArray)?.mapNotNull { it as? JsonObject }
-    } ?: listOf(this)
-    else -> emptyList()
+    is JsonArray -> map { it as? JsonObject ?: throw PersonalDataException.MissingPayload }
+    is JsonObject -> {
+        val wrapper = listOf("rows", "list", "data").firstOrNull(::containsKey)
+        if (wrapper == null) listOf(this)
+        else (this[wrapper] as? JsonArray)?.rows() ?: throw PersonalDataException.MissingPayload
+    }
+    else -> throw PersonalDataException.MissingPayload
 }
 
 private fun JsonElement.flatten(prefix: String): List<PersonalDataField> = when (this) {
@@ -432,21 +486,3 @@ private fun JsonElement?.toInstantOrNull(): Instant? {
     }
     return null
 }
-
-private fun JsonObject.isAuthenticationFailure(): Boolean {
-    val code = int("code")
-    if (code == 10105) return false
-    if (code in setOf(401, 403, 10002, 10003, 10004, 10005, 10403)) return true
-    val message = text("msg", "message").orEmpty().lowercase()
-    return listOf("未登录", "登录失效", "登录过期", "token失效", "unauthorized", "session expired")
-        .any(message::contains)
-}
-private fun Throwable.isAuthenticationFailure(): Boolean = causeChain().any {
-    it is RisingStonesHttpException.ServerResponse && it.statusCode in setOf(401, 403)
-}
-private fun Throwable.isIdentityConflict(): Boolean = causeChain().any { cause ->
-    cause is RisingStonesHttpException.ServerResponse && runCatching {
-        Json.parseToJsonElement(cause.responseBody.decodeToString()).jsonObject.int("code") == 10105
-    }.getOrDefault(false)
-}
-private fun Throwable.causeChain(): Sequence<Throwable> = generateSequence(this) { it.cause }

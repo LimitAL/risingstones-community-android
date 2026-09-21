@@ -8,10 +8,16 @@
     <string name="rising_stones_account_house">Estate</string>
     <string name="rising_stones_account_sign_count">Signed in %1$d times this month</string>
     <string name="rising_stones_account_sign_in">Daily sign-in</string>
+    <string name="rising_stones_account_signed_in">Signed in</string>
+    <string name="rising_stones_account_confirm_daily_sign_in">This will complete today’s sign-in for the current character.</string>
+    <string name="rising_stones_account_confirm_claim_reward">Claim this month’s “%1$s”?</string>
+    <string name="rising_stones_account_confirm_sign_in">Sign in</string>
+    <string name="rising_stones_account_cancel">Cancel</string>
     <string name="rising_stones_account_rewards">Monthly rewards</string>
     <string name="rising_stones_account_required_days">Available after %1$d sign-ins</string>
     <string name="rising_stones_account_claim">Claim</string>
     <string name="rising_stones_account_received">Received</string>
     <string name="rising_stones_account_not_qualified">Not yet available</string>
     <string name="rising_stones_account_no_rewards">No reward information</string>
+    <string name="rising_stones_account_my_guild">My free company</string>
 </resources>

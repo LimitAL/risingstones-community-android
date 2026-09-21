@@ -113,26 +113,27 @@ class RisingStonesWebLoginController(
             .mapNotNull { header -> risingStonesCookieValue(header) }
             .firstOrNull()
             ?: return
-        if (!candidateGate.shouldEmit(candidate, navigationTracker.returnGeneration)) return
+        val userAgent = webView.settings.userAgentString
+        if (!candidateGate.shouldEmit(candidate, userAgent, navigationTracker.returnGeneration)) return
         cookieManager.flush()
         onCredentialCandidate(
             RisingStonesCookieCredential(
                 cookie = candidate,
-                userAgent = webView.settings.userAgentString,
+                userAgent = userAgent,
             ),
         )
     }
 }
 
 internal class RisingStonesCookieCandidateGate {
-    private var lastCandidateKey: Pair<String, Int>? = null
+    private var lastCandidateKey: Triple<String, String, Int>? = null
 
     fun startAttempt() {
         lastCandidateKey = null
     }
 
-    fun shouldEmit(candidate: String, returnGeneration: Int): Boolean {
-        val candidateKey = candidate to returnGeneration
+    fun shouldEmit(candidate: String, userAgent: String, returnGeneration: Int): Boolean {
+        val candidateKey = Triple(candidate, userAgent, returnGeneration)
         if (candidateKey == lastCandidateKey) return false
         lastCandidateKey = candidateKey
         return true

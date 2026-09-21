@@ -18,6 +18,49 @@ import top.cxmeow.risingstones.network.RisingStonesSessionValidator
 
 class RisingStonesPersonalDataSessionValidatorTest {
     @Test
+    fun accepted10002RootProbesAddOnlyPersonalDataDespiteAuthenticationMessage() = runBlocking {
+        val transport = PersonalDataValidationTransport(
+            identityPayload = """{"code":10002,"msg":"未登录","data":{"character_name":"Fixture Hero"}}""",
+            availabilityPayload = """{"code":10002,"msg":"登录失效","data":{"pvp":"1"}}""",
+        )
+
+        val result = validator(transport).validateSession(RisingStonesRequestAuthorizer { _, _ -> })
+
+        assertEquals(
+            setOf(RisingStonesCapability.AccountRead, RisingStonesCapability.GlamourAuthenticated,
+                RisingStonesCapability.PersonalData),
+            result.capabilities,
+        )
+        assertEquals("Meteor", result.displayName)
+        assertEquals(2, transport.requests.size)
+    }
+
+    @Test
+    fun acceptedCodesStillRequireObjectsFromBothRootProbes() = runBlocking {
+        for (code in listOf(10000, 10002)) {
+            for (data in listOf("", ",\"data\":null", ",\"data\":[]")) {
+                for (invalidIdentity in listOf(true, false)) {
+                    val invalid = """{"code":$code$data}"""
+                    val valid = """{"code":$code,"data":{}}"""
+                    val transport = PersonalDataValidationTransport(
+                        identityPayload = if (invalidIdentity) invalid else valid,
+                        availabilityPayload = if (invalidIdentity) valid else invalid,
+                    )
+
+                    val result = validator(transport).validateSession(RisingStonesRequestAuthorizer { _, _ -> })
+
+                    assertEquals(
+                        setOf(RisingStonesCapability.AccountRead, RisingStonesCapability.GlamourAuthenticated),
+                        result.capabilities,
+                    )
+                    assertEquals("Meteor", result.displayName)
+                    assertEquals(2, transport.requests.size)
+                }
+            }
+        }
+    }
+
+    @Test
     fun capabilityIsGrantedOnlyAfterBothReadOnlyRootProbesSucceed() = runBlocking {
         val transport = PersonalDataValidationTransport()
         val contexts = mutableListOf<RisingStonesRequestContext>()

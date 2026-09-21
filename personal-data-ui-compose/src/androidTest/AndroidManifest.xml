@@ -1,0 +1,25 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity android:name="top.cxmeow.risingstones.feature.personaldata.ui.compose.PersonalDataShareTestActivity" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:exported="false" />
+        <activity
+            android:name="top.cxmeow.risingstones.feature.personaldata.ui.compose.PersonalDataPhantomWeaponTestActivity"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar"
+            android:exported="false" />
+        <activity
+            android:name="top.cxmeow.risingstones.feature.personaldata.ui.compose.PersonalDataUltimateTestActivity"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar"
+            android:exported="false" />
+        <activity
+            android:name="top.cxmeow.risingstones.feature.personaldata.ui.compose.PersonalDataFrontlineTestActivity"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar"
+            android:exported="false" />
+        <activity
+            android:name="top.cxmeow.risingstones.feature.personaldata.ui.compose.PersonalDataDashboardTestActivity"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar"
+            android:exported="false" />
+        <activity
+            android:name="top.cxmeow.risingstones.feature.personaldata.ui.compose.PersonalDataReadingTestActivity"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar"
+            android:exported="false" />
+    </application>
+</manifest>

@@ -1,0 +1,34 @@
+<resources>
+    <string name="message_title">訊息</string>
+    <string name="message_back">返回</string>
+    <string name="message_select">選擇訊息類別</string>
+    <string name="message_read_notice">開啟類別會更新對應的未讀狀態。</string>
+    <string name="message_sign_in">請使用已驗證的工作階段登入後查看訊息。</string>
+    <string name="message_unread">%1$d 則未讀</string>
+    <string name="message_refresh_counts">重新整理未讀數</string>
+    <string name="message_refresh">重新整理</string>
+    <string name="message_received">評論我的</string>
+    <string name="message_sent">我發佈的</string>
+    <string name="message_empty">此類別暫無訊息</string>
+    <string name="message_more">載入更多</string>
+    <string name="message_contact">聯絡方式</string>
+    <string name="message_image">訊息圖片</string>
+    <string name="message_source">查看來源</string>
+    <string name="message_official_link">開啟官方頁面</string>
+    <string name="message_category_unavailable">目前帳號無法使用此訊息類別。</string>
+    <string name="message_refresh_failed">重新整理失敗，已保留原訊息。</string>
+    <string name="message_failed">訊息載入失敗。</string>
+    <string name="message_retry">重試</string>
+    <string name="message_system">系統訊息</string>
+    <string name="message_mentions">提及我的</string>
+    <string name="message_comments">評論</string>
+    <string name="message_likes">按讚與收藏</string>
+    <string name="message_recruitment">招募訊息</string>
+    <string name="message_responses">我回應的招募</string>
+    <string name="message_beginner">新人</string>
+    <string name="message_duty">副本</string>
+    <string name="message_guild">部隊</string>
+    <string name="message_other">其他</string>
+    <string name="message_open_author">查看社群個人主頁</string>
+    <string name="message_author_self">我</string>
+</resources>

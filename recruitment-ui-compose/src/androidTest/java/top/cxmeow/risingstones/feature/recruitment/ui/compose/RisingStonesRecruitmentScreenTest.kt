@@ -12,6 +12,9 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import java.time.Instant
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import top.cxmeow.risingstones.feature.recruitment.presentation.RecruitmentBoardKind
 import org.junit.Rule
 import org.junit.Test
 import top.cxmeow.risingstones.feature.recruitment.domain.CommunityRecruitmentDetail
@@ -69,6 +72,30 @@ class RisingStonesRecruitmentScreenTest {
 
         composeRule.onNodeWithText("List excerpt", substring = true).assertExists()
         composeRule.onNodeWithText("Team detail").assertExists()
+    }
+
+
+    @Test fun compactStandaloneDetailReturnsToCaller() = standaloneDetail(599)
+    @Test fun mediumStandaloneDetailReturnsToCaller() = standaloneDetail(600)
+    @Test fun upperMediumStandaloneDetailReturnsToCaller() = standaloneDetail(839)
+    @Test fun expandedStandaloneDetailReturnsToCaller() = standaloneDetail(840)
+
+    private fun standaloneDetail(width: Int) {
+        var loadedId: Int? = null
+        var returned = false
+        val service = object : DutyRecruitmentService by FakeRecruitmentService {
+            override suspend fun fetchDutyRecruitmentDetail(id: Int) = FakeRecruitmentService.fetchDutyRecruitmentDetail(id).also { loadedId = id }
+        }
+        composeRule.setContent { MaterialTheme {
+            Box(Modifier.width(width.dp).height(1000.dp)) {
+                RisingStonesRecruitmentDetailScreen(service, 42, RecruitmentBoardKind.Duty, { returned = true })
+            }
+        } }
+        waitFor("Team detail")
+        assertEquals(42, loadedId)
+        composeRule.onNodeWithText("List excerpt", substring = true).assertDoesNotExist()
+        composeRule.onNodeWithText("Back").performClick()
+        assertTrue(returned)
     }
 
     private fun showAtWidth(width: Dp) {

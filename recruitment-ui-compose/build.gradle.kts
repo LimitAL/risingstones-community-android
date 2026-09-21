@@ -37,6 +37,9 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.kotlinx.coroutines.core)
+    implementation(platform(libs.okhttp.bom))
+    implementation(libs.okhttp)
 
     testImplementation(libs.junit)
 

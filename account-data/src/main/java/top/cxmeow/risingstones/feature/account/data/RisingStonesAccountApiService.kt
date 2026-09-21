@@ -15,6 +15,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
+import top.cxmeow.risingstones.core.auth.RisingStonesExplicitCapabilityProvider
 import top.cxmeow.risingstones.core.auth.RisingStonesAuthenticationRequirement
 import top.cxmeow.risingstones.core.auth.RisingStonesCapability
 import top.cxmeow.risingstones.core.auth.RisingStonesHeaderSink
@@ -22,6 +23,7 @@ import top.cxmeow.risingstones.core.auth.RisingStonesIdentityConflictResolver
 import top.cxmeow.risingstones.core.auth.RisingStonesRequestAuthorizer
 import top.cxmeow.risingstones.core.auth.RisingStonesRequestContext
 import top.cxmeow.risingstones.core.auth.RisingStonesSessionProvider
+import top.cxmeow.risingstones.feature.account.domain.RisingStonesAccountActionVerificationService
 import top.cxmeow.risingstones.feature.account.domain.RisingStonesAccountDashboard
 import top.cxmeow.risingstones.feature.account.domain.RisingStonesAccountException
 import top.cxmeow.risingstones.feature.account.domain.RisingStonesAccountService
@@ -36,6 +38,7 @@ import top.cxmeow.risingstones.network.RisingStonesApiRequest
 import top.cxmeow.risingstones.network.RisingStonesHttpException
 import top.cxmeow.risingstones.network.RisingStonesHttpMethod
 import top.cxmeow.risingstones.network.RisingStonesPublicApiClient
+import top.cxmeow.risingstones.network.RisingStonesResponsePolicy
 
 class RisingStonesAccountApiService(
     private val client: RisingStonesPublicApiClient,
@@ -44,7 +47,11 @@ class RisingStonesAccountApiService(
     private val signInMonth: () -> String = {
         YearMonth.now(ZoneId.of("Asia/Shanghai")).toString()
     },
-) : RisingStonesAccountService {
+) : RisingStonesAccountService, RisingStonesAccountActionVerificationService {
+    override val canVerifyDailySignIn: Boolean
+        get() = (sessionProvider as? RisingStonesExplicitCapabilityProvider)
+            ?.canAttemptCapability(RisingStonesCapability.DailySignIn) == true
+
     override suspend fun fetchSignInSummary(): RisingStonesSignInSummary {
         val logData = perform(
             path = "api/home/sign/mySignLog",
@@ -98,7 +105,10 @@ class RisingStonesAccountApiService(
                     },
                 )
             }
-        }.getOrDefault(emptyList())
+        }.getOrElse { error ->
+            if (error is CancellationException) throw error
+            emptyList()
+        }
         return RisingStonesSignInSummary(
             signInCount = logData?.intValue("count"),
             signInLogs = logs,
@@ -126,14 +136,21 @@ class RisingStonesAccountApiService(
     }
 
     override suspend fun signIn(): RisingStonesDailySignInResult {
+        if (RisingStonesCapability.DailySignIn in sessionProvider.capabilities &&
+            sessionProvider is RisingStonesExplicitCapabilityProvider
+        ) return verifyAction("api/home/sign/signIn", ByteArray(0), setOf(10001), ::signInResult)
         val envelope = perform(
             path = "api/home/sign/signIn",
             capability = RisingStonesCapability.DailySignIn,
             method = RisingStonesHttpMethod.Post,
-            acceptedCodes = setOf(10000, 10001),
+            acceptedCodes = setOf(10001),
             body = ByteArray(0),
             contentType = FormContentType,
         )
+        return signInResult(envelope)
+    }
+
+    private fun signInResult(envelope: JsonObject): RisingStonesDailySignInResult {
         val code = envelope.intValue("code")
         val message = envelope.stringValue("msg", "message")
         val data = envelope.objectValue("data")
@@ -149,6 +166,9 @@ class RisingStonesAccountApiService(
     }
 
     override suspend fun claimReward(id: Int): String {
+        if (RisingStonesCapability.DailySignIn in sessionProvider.capabilities &&
+            sessionProvider is RisingStonesExplicitCapabilityProvider
+        ) return verifyClaimReward(id)
         val envelope = perform(
             path = "api/home/sign/getSignReward",
             capability = RisingStonesCapability.DailySignIn,
@@ -159,6 +179,72 @@ class RisingStonesAccountApiService(
         return envelope.stringValue("msg", "message") ?: "OK"
     }
 
+    override suspend fun verifyDailySignIn(): RisingStonesDailySignInResult =
+        verifyAction("api/home/sign/signIn", ByteArray(0)) { envelope ->
+            val data = envelope.objectValue("data")
+                ?: throw RisingStonesAccountException.MissingPayload
+            if (data.intValue("totalDays")?.let { it >= 0 } != true) {
+                throw RisingStonesAccountException.MissingPayload
+            }
+            signInResult(envelope)
+        }
+
+    override suspend fun verifyClaimReward(id: Int): String {
+        require(id > 0) { "Invalid Rising Stones reward" }
+        return verifyAction("api/home/sign/getSignReward",
+            formBody("id" to id.toString(), "month" to signInMonth())) { envelope ->
+            // This action's official consumer uses the accepted status, not a required data object.
+            envelope.stringValue("msg", "message")?.takeIf(String::isNotBlank) ?: "OK"
+        }
+    }
+
+    private suspend fun <T> verifyAction(
+        path: String,
+        body: ByteArray,
+        acceptedCodes: Set<Int> = emptySet(),
+        map: (JsonObject) -> T,
+    ): T {
+        val context = RisingStonesRequestContext(path, RisingStonesAuthenticationRequirement.Required,
+            RisingStonesCapability.DailySignIn)
+        val attempt = (sessionProvider as? RisingStonesExplicitCapabilityProvider)
+            ?.beginCapabilityAttempt(context) ?: throw RisingStonesAccountException.AuthenticationRequired
+        try {
+            val response = client.execute(RisingStonesApiRequest(path,
+                method = RisingStonesHttpMethod.Post,
+                headers = attempt.authorizer.headers(path, RisingStonesCapability.DailySignIn),
+                body = body, contentType = FormContentType))
+            if (response.statusCode !in 200..299) {
+                throw RisingStonesHttpException.ServerResponse(response.statusCode, response.body)
+            }
+            val envelope = try {
+                json.parseToJsonElement(response.body.decodeToString()).jsonObject
+            } catch (_: IllegalArgumentException) {
+                throw RisingStonesAccountException.MissingPayload
+            }
+            if (!RisingStonesResponsePolicy.accepts(envelope.intValue("code")) &&
+                envelope.intValue("code") !in acceptedCodes
+            ) {
+                throw RisingStonesAccountException.Business(envelope.intValue("code"),
+                    envelope.stringValue("msg", "message"))
+            }
+            val result = map(envelope)
+            if (!attempt.complete()) throw RisingStonesAccountException.AuthenticationRequired
+            return result
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            if (error.isHttpAuthenticationFailure() ||
+                (error is RisingStonesAccountException.Business && error.code in setOf(401, 403, 10003, 10004, 10005, 10403))
+            ) {
+                // Revalidate only reads. A rejected write is never automatically replayed.
+                revalidateWithoutReplay()
+            }
+            throw error
+        } finally {
+            attempt.close()
+        }
+    }
+
     private suspend fun perform(
         path: String,
         capability: RisingStonesCapability,
@@ -166,7 +252,7 @@ class RisingStonesAccountApiService(
         query: List<RisingStonesApiQueryItem> = emptyList(),
         body: ByteArray? = null,
         contentType: String = "application/json; charset=utf-8",
-        acceptedCodes: Set<Int> = setOf(10000),
+        acceptedCodes: Set<Int> = emptySet(),
     ): JsonObject {
         if (capability !in sessionProvider.capabilities) {
             throw RisingStonesAccountException.AuthenticationRequired
@@ -188,6 +274,21 @@ class RisingStonesAccountApiService(
                 ).body.decodeToString(),
             ).jsonObject
         }
+        if (method != RisingStonesHttpMethod.Get && method != RisingStonesHttpMethod.Head) {
+            // Legacy providers retain their public contract but never replay an explicit write.
+            val response = try {
+                execute(initialAuthorizer)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (error.isHttpAuthenticationFailure()) revalidateWithoutReplay()
+                throw error
+            }
+            val code = response.intValue("code")
+            if (RisingStonesResponsePolicy.accepts(code) || code in acceptedCodes) return response
+            if (code != IdentityConflictCode && response.isAuthenticationFailure()) revalidateWithoutReplay()
+            throw RisingStonesAccountException.Business(code, response.stringValue("msg", "message"))
+        }
         var response = try {
             execute(initialAuthorizer)
         } catch (error: CancellationException) {
@@ -204,6 +305,9 @@ class RisingStonesAccountApiService(
                 else -> throw error
             }
         }
+        if (RisingStonesResponsePolicy.accepts(response.intValue("code")) ||
+            response.intValue("code") in acceptedCodes
+        ) return response
         if (response.intValue("code") == IdentityConflictCode) {
             (sessionProvider as? RisingStonesIdentityConflictResolver)
                 ?.awaitIdentityConflictResolution()
@@ -212,13 +316,19 @@ class RisingStonesAccountApiService(
             sessionProvider.refreshAuthorizer()?.let { response = execute(it) }
         }
         val code = response.intValue("code")
-        if (code !in acceptedCodes) {
+        if (!RisingStonesResponsePolicy.accepts(code) && code !in acceptedCodes) {
             throw RisingStonesAccountException.Business(
                 code = code,
                 serverMessage = response.stringValue("msg", "message"),
             )
         }
         return response
+    }
+
+    private suspend fun revalidateWithoutReplay() {
+        try { sessionProvider.refreshAuthorizer() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { /* Preserve the action failure without repeating the write. */ }
     }
 
     private companion object {
@@ -338,8 +448,8 @@ private fun defaultRewardDescription(id: Int): String = when (id) {
 
 private fun JsonObject.isAuthenticationFailure(): Boolean {
     val code = intValue("code")
-    if (code == 10105) return false
-    if (code in setOf(401, 403, 10002, 10003, 10004, 10005, 10403)) return true
+    if (RisingStonesResponsePolicy.accepts(code) || code == 10105) return false
+    if (code in setOf(401, 403, 10003, 10004, 10005, 10403)) return true
     val message = stringValue("msg", "message").orEmpty().lowercase()
     return listOf(
         "未登录",

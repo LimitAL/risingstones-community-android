@@ -1,5 +1,14 @@
 package top.cxmeow.risingstones.feature.recruitment.ui.compose
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.ViewModelStore
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -16,6 +25,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AssistChip
@@ -34,8 +44,13 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -47,10 +62,13 @@ import top.cxmeow.risingstones.feature.recruitment.domain.CommunityRecruitmentSu
 import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentDetail
 import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentService
 import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentSummary
+import top.cxmeow.risingstones.feature.recruitment.domain.RecruitmentActionEligibilityService
 import top.cxmeow.risingstones.feature.recruitment.presentation.DutyRecruitmentUiState
 import top.cxmeow.risingstones.feature.recruitment.presentation.DutyRecruitmentViewModel
 import top.cxmeow.risingstones.feature.recruitment.presentation.DutyRecruitmentViewModelFactory
 import top.cxmeow.risingstones.feature.recruitment.presentation.RecruitmentBoardKind
+import top.cxmeow.risingstones.feature.recruitment.presentation.RecruitmentInteractionState
+import top.cxmeow.risingstones.feature.recruitment.presentation.RolePlayDirectorySection
 
 /**
  * Replaceable Material 3 reference UI for the public recruitment contracts.
@@ -66,10 +84,18 @@ fun RisingStonesRecruitmentScreen(
     modifier: Modifier = Modifier,
 ) {
     val viewModel: DutyRecruitmentViewModel = viewModel(
-        key = "rising-stones-recruitment",
+        key = "rising-stones-recruitment-${System.identityHashCode(service)}",
         factory = remember(service) { DutyRecruitmentViewModelFactory(service) },
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val interaction by viewModel.interactionState.collectAsStateWithLifecycle()
+    val openDirectory = RecruitmentDirectoryNavigation(service, state, "main")
+    val listScroll = rememberSaveable(state.board, saver = LazyListState.Saver) { LazyListState() }
+    val detailScroll = rememberSaveable(state.board, state.selectedId, saver = LazyListState.Saver) { LazyListState() }
+    var filtersOpen by rememberSaveable(state.board) { mutableStateOf(false) }
+    RecruitmentCapabilityBoundary(service, viewModel)
+    RecruitmentInteractionPanels(state, interaction, viewModel)
+    if (filtersOpen) RecruitmentFilterDialog(state, viewModel) { filtersOpen = false }
 
     BackHandler {
         if (state.selectedId != null) viewModel.clearSelection() else onNavigateBack()
@@ -91,6 +117,9 @@ fun RisingStonesRecruitmentScreen(
                     }
                 },
                 actions = {
+                    TextButton(onClick = { filtersOpen = true }, modifier = Modifier.testTag("recruitment-filters")) {
+                        Text(stringResource(R.string.recruitment_filters))
+                    }
                     TextButton(onClick = viewModel::refresh) {
                         Text(stringResource(R.string.recruitment_refresh))
                     }
@@ -111,12 +140,15 @@ fun RisingStonesRecruitmentScreen(
                             state = state,
                             viewModel = viewModel,
                             modifier = Modifier.fillMaxSize(),
+                            scroll = listScroll,
                         )
                     } else {
                         RecruitmentDetailPane(
                             state = state,
                             viewModel = viewModel,
                             modifier = Modifier.fillMaxSize(),
+                            onOpenDirectory = openDirectory,
+                            scroll = detailScroll,
                         )
                     }
                 }
@@ -127,6 +159,7 @@ fun RisingStonesRecruitmentScreen(
                     RecruitmentListPane(
                         state = state,
                         viewModel = viewModel,
+                        scroll = listScroll,
                         modifier = Modifier
                             .width(
                                 if (layoutMode == RisingStonesRecruitmentLayoutMode.Expanded) {
@@ -141,6 +174,8 @@ fun RisingStonesRecruitmentScreen(
                     RecruitmentDetailPane(
                         state = state,
                         viewModel = viewModel,
+                        onOpenDirectory = openDirectory,
+                        scroll = detailScroll,
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight(),
@@ -156,7 +191,9 @@ private fun RecruitmentListPane(
     state: DutyRecruitmentUiState,
     viewModel: DutyRecruitmentViewModel,
     modifier: Modifier,
+    scroll: LazyListState,
 ) {
+    val authors by viewModel.authorState.collectAsStateWithLifecycle()
     val boards = buildList {
         add(RecruitmentBoardKind.Duty)
         add(RecruitmentBoardKind.Beginner)
@@ -198,7 +235,7 @@ private fun RecruitmentListPane(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(listError, color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.recruitment_load_failed), color = MaterialTheme.colorScheme.error)
                     TextButton(onClick = viewModel::refresh) {
                         Text(stringResource(R.string.recruitment_retry))
                     }
@@ -210,13 +247,14 @@ private fun RecruitmentListPane(
             }
 
             else -> LazyColumn(
+                state = scroll,
                 contentPadding = PaddingValues(vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 if (listError != null) {
                     item {
                         Text(
-                            text = listError,
+                            text = stringResource(R.string.recruitment_load_failed),
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodySmall,
@@ -234,6 +272,7 @@ private fun RecruitmentListPane(
                 } else {
                     items(state.communityItems, key = CommunityRecruitmentSummary::id) { item ->
                         CommunityRecruitmentListCard(
+                            authorUuid = authors.communityAuthors[item.id],
                             item = item,
                             selected = state.selectedId == item.id,
                             onClick = { viewModel.selectDetail(item.id) },
@@ -287,11 +326,9 @@ private fun DutyRecruitmentListCard(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(item.dutyName, fontWeight = FontWeight.SemiBold)
-            Text(
-                "${item.characterName} · ${item.areaName}/${item.groupName}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            RecruitmentAuthorName(item.characterName, item.uuid)
+            Text("${item.areaName}/${item.groupName}", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
             listOf(item.schedule, item.progress, item.strategy)
                 .filter(String::isNotBlank)
                 .joinToString(" · ")
@@ -310,6 +347,7 @@ private fun DutyRecruitmentListCard(
 
 @Composable
 private fun CommunityRecruitmentListCard(
+    authorUuid: String?,
     item: CommunityRecruitmentSummary,
     selected: Boolean,
     onClick: () -> Unit,
@@ -332,7 +370,8 @@ private fun CommunityRecruitmentListCard(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(item.title, fontWeight = FontWeight.SemiBold)
-            listOfNotNull(item.authorName, item.sourceLocation, item.targetLocation)
+            RecruitmentAuthorName(item.authorName, authorUuid)
+            listOfNotNull(item.sourceLocation, item.targetLocation)
                 .filter(String::isNotBlank)
                 .joinToString(" · ")
                 .takeIf(String::isNotBlank)
@@ -360,10 +399,13 @@ private fun RecruitmentDetailPane(
     state: DutyRecruitmentUiState,
     viewModel: DutyRecruitmentViewModel,
     modifier: Modifier,
+    scroll: LazyListState,
+    onOpenDirectory: ((RolePlayDirectorySection) -> Unit)? = null,
 ) {
     val dutyDetail = state.dutyDetail
     val communityDetail = state.communityDetail
     val detailError = state.detailError
+    val interaction by viewModel.interactionState.collectAsStateWithLifecycle()
     when {
         state.selectedId == null -> RecruitmentCenteredMessage(modifier) {
             Text(stringResource(R.string.recruitment_select))
@@ -378,28 +420,35 @@ private fun RecruitmentDetailPane(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(detailError, color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.recruitment_load_failed), color = MaterialTheme.colorScheme.error)
                     TextButton(onClick = viewModel::retryDetail) {
                         Text(stringResource(R.string.recruitment_retry))
                     }
                 }
             }
 
-        dutyDetail != null -> DutyRecruitmentDetailContent(dutyDetail, detailError, viewModel, modifier)
+        dutyDetail != null -> DutyRecruitmentDetailContent(state, interaction, detailError, viewModel, modifier, scroll)
         communityDetail != null ->
-            CommunityRecruitmentDetailContent(communityDetail, state, detailError, viewModel, modifier)
+            CommunityRecruitmentDetailContent(communityDetail, state, interaction, detailError, viewModel, modifier, onOpenDirectory, scroll)
+        else -> RecruitmentCenteredMessage(modifier) {
+            RecruitmentReadRetry(viewModel::retryDetail)
+        }
     }
 }
 
 @Composable
 private fun DutyRecruitmentDetailContent(
-    detail: DutyRecruitmentDetail,
+    state: DutyRecruitmentUiState,
+    interaction: RecruitmentInteractionState,
     refreshError: String?,
     viewModel: DutyRecruitmentViewModel,
     modifier: Modifier,
+    scroll: LazyListState,
 ) {
+    val detail = state.dutyDetail ?: return
     LazyColumn(
-        modifier = modifier,
+        modifier = modifier.testTag("recruitment-detail-content"),
+        state = scroll,
         contentPadding = PaddingValues(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -412,10 +461,9 @@ private fun DutyRecruitmentDetailContent(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(detail.summary.dutyName, style = MaterialTheme.typography.headlineSmall)
-                Text(
-                    "${detail.summary.characterName} · ${detail.summary.areaName}/${detail.summary.groupName}",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                RecruitmentAuthorName(detail.summary.characterName, detail.summary.uuid)
+                Text("${detail.summary.areaName}/${detail.summary.groupName}",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                 RecruitmentChips(
                     listOf(
                         detail.summary.dutyType,
@@ -425,8 +473,10 @@ private fun DutyRecruitmentDetailContent(
                     ),
                 )
                 refreshError?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error)
+                    RecruitmentReadRetry(viewModel::refreshDetail)
                 }
+                RecruitmentResponseActions(state, interaction, viewModel)
+                interaction.responseError?.let { RecruitmentInteractionErrorText(it) }
                 RecruitmentTextSection(stringResource(R.string.recruitment_team), detail.teamDetail)
                 RecruitmentTextSection(
                     stringResource(R.string.recruitment_requirements),
@@ -448,12 +498,17 @@ private fun DutyRecruitmentDetailContent(
 private fun CommunityRecruitmentDetailContent(
     detail: CommunityRecruitmentDetail,
     state: DutyRecruitmentUiState,
+    interaction: RecruitmentInteractionState,
     refreshError: String?,
     viewModel: DutyRecruitmentViewModel,
     modifier: Modifier,
+    onOpenDirectory: ((RolePlayDirectorySection) -> Unit)?,
+    scroll: LazyListState,
 ) {
+    val authors by viewModel.authorState.collectAsStateWithLifecycle()
     LazyColumn(
-        modifier = modifier,
+        modifier = modifier.testTag("recruitment-detail-content"),
+        state = scroll,
         contentPadding = PaddingValues(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -466,69 +521,39 @@ private fun CommunityRecruitmentDetailContent(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(detail.summary.title, style = MaterialTheme.typography.headlineSmall)
+                RecruitmentAuthorName(detail.summary.authorName, authors.selectedAuthorUuid)
                 listOfNotNull(
-                    detail.summary.authorName,
                     detail.summary.sourceLocation,
                     detail.summary.targetLocation,
                 ).filter(String::isNotBlank).joinToString(" · ").takeIf(String::isNotBlank)?.let {
                     Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 RecruitmentChips(detail.information.map { it.value })
-                refreshError?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error)
+                if (state.board == RecruitmentBoardKind.RolePlay && onOpenDirectory != null) {
+                    RolePlayDirectoryLinks(onOpenDirectory)
                 }
+                refreshError?.let {
+                    RecruitmentReadRetry(viewModel::refreshDetail)
+                }
+                RecruitmentResponseActions(state, interaction, viewModel)
+                interaction.responseError?.let { RecruitmentInteractionErrorText(it) }
                 detail.content.forEach { content ->
                     RecruitmentTextSection(
                         stringResource(R.string.recruitment_description),
                         content.text,
                     )
+                    content.imageUrls.forEach { RecruitmentContentImage(it) }
                 }
                 detail.summary.summary?.let {
                     RecruitmentTextSection(stringResource(R.string.recruitment_summary), it)
                 }
                 if (state.board == RecruitmentBoardKind.RolePlay) {
-                    RolePlayReadOnlyExtras(state)
+                    RecruitmentRolePlayContent(state, interaction, viewModel)
                 }
                 TextButton(onClick = viewModel::refreshDetail) {
                     Text(stringResource(R.string.recruitment_refresh_detail))
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun RolePlayReadOnlyExtras(state: DutyRecruitmentUiState) {
-    val rating = state.rating
-    Text(stringResource(R.string.recruitment_roleplay_extras), fontWeight = FontWeight.SemiBold)
-    when {
-        state.isLoadingMembers || state.isLoadingReviews || state.isLoadingRating ->
-            Text(stringResource(R.string.recruitment_loading))
-    }
-    rating?.let {
-        Text(
-            stringResource(
-                R.string.recruitment_rating,
-                it.averageScore,
-                it.totalCount,
-            ),
-        )
-    }
-    if (state.members.isNotEmpty()) {
-        RecruitmentChips(state.members.map { it.name })
-    }
-    state.reviewsError?.let {
-        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-    }
-    state.reviews.forEach { review ->
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(review.authorName, fontWeight = FontWeight.Medium)
-            Text(review.content, style = MaterialTheme.typography.bodyMedium)
-            Text(
-                stringResource(R.string.recruitment_likes, review.likeCount),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelSmall,
-            )
         }
     }
 }
@@ -578,3 +603,91 @@ private fun RecruitmentBoardKind.label(): String = stringResource(
         RecruitmentBoardKind.RolePlay -> R.string.recruitment_board_roleplay
     },
 )
+
+
+/** Standalone detail retained across configuration changes and cleared when the route closes. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RisingStonesRecruitmentDetailScreen(
+    service: DutyRecruitmentService,
+    id: Int,
+    board: RecruitmentBoardKind,
+    onNavigateBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    require(id > 0)
+    val owner: RecruitmentDetailRouteStore = viewModel(
+        key = "rising-stones-recruitment-detail-${System.identityHashCode(service)}-$board-$id",
+        factory = RecruitmentDetailRouteStoreFactory,
+    )
+    val activity = LocalContext.current.findActivity()
+    DisposableEffect(owner, activity) {
+        onDispose { if (activity?.isChangingConfigurations != true) owner.viewModelStore.clear() }
+    }
+    val viewModel: DutyRecruitmentViewModel = viewModel(
+        viewModelStoreOwner = owner,
+        factory = remember(service) { DutyRecruitmentViewModelFactory(service, autoLoadList = false) },
+    )
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val interaction by viewModel.interactionState.collectAsStateWithLifecycle()
+    val openDirectory = RecruitmentDirectoryNavigation(service, state, "source-" + board + "-" + id)
+    val detailScroll = rememberSaveable(board, id, saver = LazyListState.Saver) { LazyListState() }
+    RecruitmentCapabilityBoundary(service, viewModel)
+    RecruitmentInteractionPanels(state, interaction, viewModel)
+    val canRead = board != RecruitmentBoardKind.Guild || service.hasCommunityIdentity
+    LaunchedEffect(viewModel, id, board, canRead) {
+        if (canRead) {
+            viewModel.selectBoard(board, loadList = false)
+            viewModel.selectDetail(id)
+        }
+    }
+    BackHandler(onBack = onNavigateBack)
+    Scaffold(modifier = modifier, topBar = {
+        TopAppBar(
+            title = { Text(stringResource(R.string.recruitment_title)) },
+            navigationIcon = {
+                TextButton(onClick = onNavigateBack) { Text(stringResource(R.string.recruitment_back)) }
+            },
+        )
+    }) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
+            Box(Modifier.widthIn(max = 920.dp).fillMaxSize()) {
+                if (canRead) RecruitmentDetailPane(state, viewModel, Modifier.fillMaxSize(), detailScroll, openDirectory)
+                else RecruitmentCenteredMessage(Modifier.fillMaxSize()) {
+                    Text(stringResource(R.string.recruitment_identity_required))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecruitmentCapabilityBoundary(service: DutyRecruitmentService, model: DutyRecruitmentViewModel) {
+    val canReadGuild = service.hasCommunityIdentity
+    val canWrite = (service as? top.cxmeow.risingstones.feature.recruitment.domain.RecruitmentInteractionService)
+        ?.canPerformAuthenticatedWrites == true
+    val canAttemptWrite = (service as? RecruitmentActionEligibilityService)?.canAttemptAuthenticatedWrites == true
+    val canInteract = canWrite || canAttemptWrite
+    var hadGuild by remember(model) { mutableStateOf(canReadGuild) }
+    var hadInteraction by remember(model) { mutableStateOf(canInteract) }
+    LaunchedEffect(canReadGuild, canInteract) {
+        if (hadGuild && !canReadGuild || hadInteraction && !canInteract) model.clearProtectedContent()
+        hadGuild = canReadGuild; hadInteraction = canInteract
+    }
+}
+
+private class RecruitmentDetailRouteStore : ViewModel(), ViewModelStoreOwner {
+    override val viewModelStore = ViewModelStore()
+    override fun onCleared() { viewModelStore.clear() }
+}
+
+private object RecruitmentDetailRouteStoreFactory : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>): T = RecruitmentDetailRouteStore() as T
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> if (baseContext === this) null else baseContext.findActivity()
+    else -> null
+}

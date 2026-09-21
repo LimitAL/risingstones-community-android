@@ -108,7 +108,7 @@ if [[ ${#production_roots[@]} -eq 0 ]]; then
   exit 1
 fi
 
-allowed_url_pattern='^https://(ff14risingstones\.web\.sdo\.com|apiff14risingstones\.web\.sdo\.com|ff14risingstones\.gcloud\.com\.cn|static\.web\.sdo\.com|www\.bilibili\.com)(/|$)|^http://schemas\.android\.com(/|$)|^https://%1\$s$'
+allowed_url_pattern='^https://(ff14risingstones\.web\.sdo\.com|apiff14risingstones\.web\.sdo\.com|ff14risingstones\.gcloud\.com\.cn|static\.web\.sdo\.com|ff14-eo\.web\.sdo\.com|www\.bilibili\.com)(/|$)|^http://schemas\.android\.com(/|$)|^https://%1\$s$'
 all_urls=""
 if all_urls="$(
   grep -R -h -o -E \

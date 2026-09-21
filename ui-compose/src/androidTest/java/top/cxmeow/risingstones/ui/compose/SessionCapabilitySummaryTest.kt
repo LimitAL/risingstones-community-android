@@ -91,6 +91,11 @@ class SessionCapabilitySummaryTest {
             RecruitmentWrite=false
             GlamourAuthenticated=false
             PersonalData=false
+            DynamicRead=false
+            MessageRead=false
+            GuildRead=false
+            GuildWrite=false
+            GuildImageUpload=false
         """.trimIndent()
 
         assertEquals(expectedReport, sanitizedCapabilityReport(activeSession))
@@ -111,7 +116,65 @@ class SessionCapabilitySummaryTest {
             )
     }
 
-    private fun showAtWidth(width: Dp) {
+    @Test
+    fun guildReadDoesNotClaimRecruitmentOrWriteCapabilities() {
+        showAtWidth(400.dp, activeSession.copy(capabilities = setOf(RisingStonesCapability.GuildRead)))
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        composeRule.onNodeWithTag("rising-stones-capability-GuildRead")
+            .performScrollTo().assertTextContains(context.getString(R.string.rising_stones_capability_verified))
+        listOf("RecruitmentAuthenticated", "RecruitmentWrite", "ForumWrite", "GuildWrite", "GuildImageUpload").forEach { capability ->
+            composeRule.onNodeWithTag("rising-stones-capability-$capability")
+                .performScrollTo().assertTextContains(context.getString(R.string.rising_stones_capability_not_verified))
+        }
+    }
+
+    @Test
+    fun verifiedGuildWriteDoesNotClaimImageUpload() {
+        assertIndependentGuildWriteSummary(
+            verified = RisingStonesCapability.GuildWrite,
+            unverified = RisingStonesCapability.GuildImageUpload,
+        )
+    }
+
+    @Test
+    fun verifiedGuildImageUploadDoesNotClaimOtherGuildWrites() {
+        assertIndependentGuildWriteSummary(
+            verified = RisingStonesCapability.GuildImageUpload,
+            unverified = RisingStonesCapability.GuildWrite,
+        )
+    }
+
+    private fun assertIndependentGuildWriteSummary(
+        verified: RisingStonesCapability,
+        unverified: RisingStonesCapability,
+    ) {
+        val session = activeSession.copy(capabilities = setOf(RisingStonesCapability.GuildRead, verified))
+        showAtWidth(400.dp, session)
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        composeRule.onNodeWithTag("rising-stones-capability-${verified.name}")
+            .performScrollTo().assertTextContains(context.getString(R.string.rising_stones_capability_verified))
+        composeRule.onNodeWithTag("rising-stones-capability-${unverified.name}")
+            .performScrollTo().assertTextContains(context.getString(R.string.rising_stones_capability_not_verified))
+        val report = sanitizedCapabilityReport(session).lines()
+        assertTrue("${verified.name}=true" in report)
+        assertTrue("${unverified.name}=false" in report)
+        assertTrue("ForumWrite=false" in report)
+        assertTrue("RecruitmentWrite=false" in report)
+    }
+
+    @Test
+    fun recruitmentVerificationDoesNotClaimGuildRead() {
+        val session = activeSession.copy(capabilities = setOf(
+            RisingStonesCapability.AccountRead, RisingStonesCapability.RecruitmentAuthenticated))
+        showAtWidth(400.dp, session)
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        composeRule.onNodeWithTag("rising-stones-capability-GuildRead")
+            .performScrollTo().assertTextContains(context.getString(R.string.rising_stones_capability_not_verified))
+        assertTrue(sanitizedCapabilityReport(session).lines().contains("GuildRead=false"))
+        assertTrue(sanitizedCapabilityReport(session).lines().contains("RecruitmentAuthenticated=true"))
+    }
+
+    private fun showAtWidth(width: Dp, session: RisingStonesSessionState.Active = activeSession) {
         assertEquals(RisingStonesCapability.entries.size, displayedCapabilities.size)
         assertEquals(RisingStonesCapability.entries.toSet(), displayedCapabilities.toSet())
         composeRule.setContent {
@@ -122,7 +185,7 @@ class SessionCapabilitySummaryTest {
             ) {
                 MaterialTheme {
                     SessionContent(
-                        sessionState = activeSession,
+                        sessionState = session,
                         loginError = null,
                         onLogin = {},
                         onSignOut = {},
@@ -160,6 +223,18 @@ class SessionCapabilitySummaryTest {
             .assertTextContains(notVerifiedText)
         composeRule
             .onNodeWithTag("rising-stones-capability-PersonalData")
+            .performScrollTo()
+            .assertTextContains(notVerifiedText)
+        composeRule
+            .onNodeWithTag("rising-stones-capability-GuildRead")
+            .performScrollTo()
+            .assertTextContains(notVerifiedText)
+        composeRule
+            .onNodeWithTag("rising-stones-capability-GuildWrite")
+            .performScrollTo()
+            .assertTextContains(notVerifiedText)
+        composeRule
+            .onNodeWithTag("rising-stones-capability-GuildImageUpload")
             .performScrollTo()
             .assertTextContains(notVerifiedText)
     }

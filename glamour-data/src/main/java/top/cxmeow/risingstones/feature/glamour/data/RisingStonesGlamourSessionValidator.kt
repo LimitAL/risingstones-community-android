@@ -16,6 +16,7 @@ import top.cxmeow.risingstones.core.auth.RisingStonesRequestContext
 import top.cxmeow.risingstones.network.RisingStonesApiQueryItem
 import top.cxmeow.risingstones.network.RisingStonesApiRequest
 import top.cxmeow.risingstones.network.RisingStonesPublicApiClient
+import top.cxmeow.risingstones.network.RisingStonesResponsePolicy
 import top.cxmeow.risingstones.network.RisingStonesSessionValidation
 import top.cxmeow.risingstones.network.RisingStonesSessionValidator
 
@@ -60,7 +61,7 @@ class RisingStonesGlamourSessionValidator(
                     ),
                 ).body.decodeToString(),
             ).jsonObject
-            if (response.intValue("code") == 10000 && response["data"] is JsonObject) {
+            if (RisingStonesResponsePolicy.accepts(response.intValue("code")) && response["data"] is JsonObject) {
                 base.copy(
                     capabilities = base.capabilities +
                         RisingStonesCapability.GlamourAuthenticated,

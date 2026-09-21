@@ -1,5 +1,14 @@
 package top.cxmeow.risingstones.feature.glamour.ui.compose
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.ViewModelStore
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -20,6 +29,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -42,6 +53,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -51,6 +63,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,6 +74,7 @@ import coil3.compose.AsyncImage
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourAccessory
+import top.cxmeow.risingstones.feature.glamour.domain.GlamourAuthor
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourDetail
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourEquipment
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourFilter
@@ -80,22 +94,70 @@ fun RisingStonesGlamourScreen(
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    GlamourBrowserScreen(service, null, onNavigateBack, modifier)
+}
+
+/** Native author works and public favorite folders. */
+@Composable
+fun RisingStonesGlamourAuthorScreen(
+    service: GlamourService,
+    author: GlamourAuthor,
+    onNavigateBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    require(!author.id.isNullOrBlank())
+    GlamourBrowserScreen(service, author, onNavigateBack, modifier)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun GlamourBrowserScreen(
+    service: GlamourService,
+    profileAuthor: GlamourAuthor?,
+    onNavigateBack: () -> Unit,
+    modifier: Modifier,
+) {
     val viewModel: GlamourViewModel = viewModel(
-        key = "rising-stones-glamour",
-        factory = remember(service) { GlamourViewModelFactory(service) },
+        key = "rising-stones-glamour-${System.identityHashCode(service)}-${profileAuthor?.id.orEmpty()}",
+        factory = remember(service, profileAuthor?.id) { GlamourViewModelFactory(service, profileAuthor) },
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val listScrollState = rememberLazyListState()
+    val detailScrollState = key(state.selectedId) { rememberLazyListState() }
+    val interactions by viewModel.interactionState.collectAsStateWithLifecycle()
+    var authorId by rememberSaveable { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    var showCandidateSearch by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    var showFolderManager by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    val onAuthor: (GlamourAuthor) -> Unit = { author ->
+        author.id?.takeIf { it.isNotBlank() && it != profileAuthor?.id }?.let { authorId = it }
+    }
+    authorId?.let { id ->
+        val author = state.selectedDetail?.author?.takeIf { it.id == id }
+            ?: state.items.firstOrNull { it.author.id == id }?.author
+            ?: GlamourAuthor(id, "", "", "", null)
+        RisingStonesGlamourAuthorScreen(service, author, { authorId = null }, modifier)
+        return
+    }
+    if (showCandidateSearch) GlamourCandidateSearchDialog(service,
+        onSelect = { viewModel.search(it); showCandidateSearch = false },
+        onDismiss = { showCandidateSearch = false })
+    if (showFolderManager && viewModel.canManageFolders) GlamourFolderManagerDialog(state, interactions, viewModel) {
+        showFolderManager = false
+    }
+    if (interactions.favoriteTargetId != null) GlamourFavoritePicker(state, interactions, viewModel)
+    val onBack = { if (state.selectedId != null) viewModel.clearSelection() else onNavigateBack() }
+    BackHandler(onBack = onBack)
 
     Scaffold(
         modifier = modifier,
         topBar = {
             TopAppBar(
                 navigationIcon = {
-                    TextButton(onClick = onNavigateBack) {
+                    TextButton(onClick = onBack) {
                         Text(stringResource(R.string.glamour_back))
                     }
                 },
-                title = { Text(stringResource(R.string.glamour_title)) },
+                title = { Text(stringResource(if (profileAuthor == null) R.string.glamour_title else R.string.glamour_author_works)) },
                 actions = {
                     TextButton(
                         onClick = viewModel::refresh,
@@ -134,6 +196,11 @@ fun RisingStonesGlamourScreen(
                         GlamourListPane(
                             state = state,
                             viewModel = viewModel,
+                            profileAuthor = profileAuthor,
+                            onAuthor = onAuthor,
+                            scrollState = listScrollState,
+                            onOpenCandidateSearch = { showCandidateSearch = true },
+                            onOpenFolderManager = { showFolderManager = true },
                             modifier = Modifier.fillMaxSize(),
                         )
                     } else {
@@ -141,6 +208,8 @@ fun RisingStonesGlamourScreen(
                             state = state,
                             viewModel = viewModel,
                             showBack = true,
+                            scrollState = detailScrollState,
+                            onAuthor = onAuthor,
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
@@ -153,6 +222,11 @@ fun RisingStonesGlamourScreen(
                         GlamourListPane(
                             state = state,
                             viewModel = viewModel,
+                            profileAuthor = profileAuthor,
+                            onAuthor = onAuthor,
+                            scrollState = listScrollState,
+                            onOpenCandidateSearch = { showCandidateSearch = true },
+                            onOpenFolderManager = { showFolderManager = true },
                             modifier = Modifier
                                 .width(
                                     if (layoutMode == RisingStonesGlamourLayoutMode.Expanded) {
@@ -186,6 +260,8 @@ fun RisingStonesGlamourScreen(
                                     state = state,
                                     viewModel = viewModel,
                                     showBack = false,
+                                    scrollState = detailScrollState,
+                                    onAuthor = onAuthor,
                                     modifier = Modifier
                                         .fillMaxHeight()
                                         .widthIn(max = 960.dp),
@@ -203,12 +279,17 @@ fun RisingStonesGlamourScreen(
 private fun GlamourListPane(
     state: GlamourUiState,
     viewModel: GlamourViewModel,
+    profileAuthor: GlamourAuthor?,
+    onAuthor: (GlamourAuthor) -> Unit,
+    onOpenCandidateSearch: () -> Unit,
+    onOpenFolderManager: () -> Unit,
+    scrollState: LazyListState,
     modifier: Modifier,
 ) {
     Column(
         modifier = modifier.testTag("glamour-list-pane"),
     ) {
-        GlamourListControls(state = state, viewModel = viewModel)
+        GlamourListControls(state, viewModel, profileAuthor, onOpenCandidateSearch, onOpenFolderManager)
         HorizontalDivider()
         if (state.isRefreshing) {
             LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -235,6 +316,8 @@ private fun GlamourListPane(
                     state = state,
                     onSelect = viewModel::selectDetail,
                     onLoadMore = viewModel::loadMore,
+                    onAuthor = onAuthor,
+                    scrollState = scrollState,
                 )
             }
         }
@@ -245,22 +328,50 @@ private fun GlamourListPane(
 private fun GlamourListControls(
     state: GlamourUiState,
     viewModel: GlamourViewModel,
+    profileAuthor: GlamourAuthor?,
+    onOpenCandidateSearch: () -> Unit,
+    onOpenFolderManager: () -> Unit,
 ) {
-    var query by rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
+    val browsing by viewModel.browsingState.collectAsStateWithLifecycle()
+    var query by rememberSaveable(state.source, browsing.following, state.search?.keywords) {
+        androidx.compose.runtime.mutableStateOf(state.search?.takeUnless {
+            it.searchByEquipment || it.searchByGlasses || it.searchByOrnament
+        }?.keywords.orEmpty())
+    }
+    var showFilters by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    if (showFilters) GlamourFilterDialog(
+        state, browsing, viewModel::loadBrowsingCatalog,
+        onApply = { filter, tribe, tags ->
+            viewModel.applyBrowsingFilter(filter, tribe, tags)
+            showFilters = false
+        },
+        onDismiss = { showFilters = false },
+    )
     Column(
         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        if (profileAuthor != null) GlamourAuthorHeader(state, profileAuthor, viewModel)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            GlamourSourceChip(
-                selected = state.source == GlamourListSource.Community,
+            if (profileAuthor == null) GlamourSourceChip(
+                selected = state.source == GlamourListSource.Community && !browsing.following,
                 label = stringResource(R.string.glamour_community),
                 onClick = { viewModel.selectSource(GlamourListSource.Community) },
+            )
+            if (profileAuthor == null && viewModel.supportsBrowsing) GlamourSourceChip(
+                selected = browsing.following,
+                label = stringResource(R.string.glamour_following),
+                onClick = viewModel::selectFollowing,
+            )
+            GlamourSourceChip(
+                selected = state.source == GlamourListSource.Profile,
+                label = stringResource(if (profileAuthor == null) R.string.glamour_my_works else R.string.glamour_works),
+                onClick = { viewModel.selectSource(GlamourListSource.Profile) },
             )
             GlamourSourceChip(
                 selected = state.source == GlamourListSource.Favorites,
@@ -269,13 +380,21 @@ private fun GlamourListControls(
             )
         }
 
-        Row(
+        if (state.source == GlamourListSource.Profile) {
+            if (state.isLoadingProfileStatistics) LinearProgressIndicator(Modifier.fillMaxWidth())
+            state.profileStatistics?.let { statistics ->
+                Text(stringResource(R.string.glamour_profile_counts, statistics.posts, statistics.likes, statistics.favorites),
+                    style = MaterialTheme.typography.labelLarge)
+            }
+        }
+
+        if (!browsing.following) Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            GlamourOrderChip(
+            if (state.source == GlamourListSource.Community) GlamourOrderChip(
                 order = GlamourListOrder.Default,
                 label = stringResource(R.string.glamour_order_default),
                 state = state,
@@ -293,9 +412,17 @@ private fun GlamourListControls(
                 state = state,
                 viewModel = viewModel,
             )
+            if (viewModel.supportsBrowsing && state.source == GlamourListSource.Community) {
+                val count = browsing.tagIds.size + listOfNotNull(state.filter.raceId,
+                    browsing.tribeId, state.filter.genderId, state.filter.createTime).size
+                OutlinedButton(onClick = { showFilters = true }) {
+                    Text(if (count == 0) stringResource(R.string.glamour_filters)
+                        else stringResource(R.string.glamour_filters_count, count))
+                }
+            }
         }
 
-        Row(
+        if (!browsing.following) Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -343,6 +470,10 @@ private fun GlamourListControls(
             }
         }
 
+        if (!browsing.following) TextButton(onClick = onOpenCandidateSearch) {
+            Text(stringResource(R.string.glamour_find_by_item))
+        }
+
         if (state.source == GlamourListSource.Favorites) {
             if (state.isLoadingFolders && state.folders.isEmpty()) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -369,6 +500,9 @@ private fun GlamourListControls(
                         )
                     }
                 }
+            }
+            if (viewModel.canManageFolders) TextButton(onClick = onOpenFolderManager) {
+                Text(stringResource(R.string.glamour_manage_folders))
             }
         }
     }
@@ -406,8 +540,12 @@ private fun GlamourList(
     state: GlamourUiState,
     onSelect: (Int) -> Unit,
     onLoadMore: () -> Unit,
+    onAuthor: (GlamourAuthor) -> Unit,
+    scrollState: LazyListState,
 ) {
     LazyColumn(
+        state = scrollState,
+        modifier = Modifier.testTag("glamour-list-content"),
         contentPadding = PaddingValues(12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -421,6 +559,7 @@ private fun GlamourList(
                 item = item,
                 isSelected = item.id == state.selectedId,
                 onClick = { onSelect(item.id) },
+                onAuthor = { onAuthor(item.author) },
             )
         }
         if (state.hasNextPage || state.isLoadingMore) {
@@ -446,6 +585,7 @@ private fun GlamourListCard(
     item: GlamourListingSummary,
     isSelected: Boolean,
     onClick: () -> Unit,
+    onAuthor: () -> Unit,
 ) {
     Card(
         colors = CardDefaults.cardColors(
@@ -479,13 +619,7 @@ private fun GlamourListCard(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(
-                    text = item.author.displayLine(),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                GlamourAuthorLink(item.author, onAuthor)
                 if (item.description.isNotBlank()) {
                     Text(
                         text = item.description,
@@ -513,8 +647,11 @@ private fun GlamourDetailPane(
     state: GlamourUiState,
     viewModel: GlamourViewModel,
     showBack: Boolean,
+    onAuthor: (GlamourAuthor) -> Unit,
     modifier: Modifier,
+    scrollState: LazyListState = rememberLazyListState(),
 ) {
+    val interactions by viewModel.interactionState.collectAsStateWithLifecycle()
     Box(modifier.testTag("glamour-detail-pane")) {
         when {
             state.isLoadingDetail && state.selectedDetail == null -> {
@@ -545,8 +682,17 @@ private fun GlamourDetailPane(
                     onBack = viewModel::clearSelection,
                     onRefresh = viewModel::refreshDetail,
                     onLike = { viewModel.toggleLike(detail.id) },
-                    onFavorite = { viewModel.toggleFavorite(detail.id) },
+                    onFavorite = {
+                        if (!detail.isFavorite && viewModel.supportsCollectionManagement) viewModel.openFavoritePicker(detail.id)
+                        else viewModel.toggleFavorite(detail.id)
+                    },
                     onClearNotice = viewModel::clearNotice,
+                    onAuthor = { onAuthor(detail.author) },
+                    interactions = interactions,
+                    onClaimCoupon = viewModel::claimSelectedCoupon,
+                    onClearCouponNotice = viewModel::clearCouponNotice,
+                    onRetryFolders = viewModel::retryFolderRefresh,
+                    scrollState = scrollState,
                 )
             }
         }
@@ -566,11 +712,22 @@ private fun GlamourDetailContent(
     onLike: () -> Unit,
     onFavorite: () -> Unit,
     onClearNotice: () -> Unit,
+    onAuthor: () -> Unit,
+    interactions: top.cxmeow.risingstones.feature.glamour.presentation.GlamourInteractionUiState,
+    onClaimCoupon: () -> Unit,
+    onClearCouponNotice: () -> Unit,
+    onRetryFolders: () -> Unit,
+    scrollState: LazyListState = rememberLazyListState(),
 ) {
     LazyColumn(
+        state = scrollState,
+        modifier = Modifier.testTag("glamour-detail-content"),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        if (interactions.folderRefreshError != null) item {
+            FolderRefreshNotice(interactions.folderRefreshError, onRetryFolders)
+        }
         if (showBack) {
             item {
                 TextButton(onClick = onBack) {
@@ -622,11 +779,7 @@ private fun GlamourDetailContent(
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
                 )
-                Text(
-                    text = detail.author.displayLine(),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                GlamourAuthorLink(detail.author, onAuthor)
                 detail.createdAt?.let {
                     Text(
                         text = DetailDateFormatter.format(it.atZone(ZoneId.systemDefault())),
@@ -686,6 +839,26 @@ private fun GlamourDetailContent(
                 }
                 TextButton(onClick = onRefresh, enabled = !isRefreshing) {
                     Text(stringResource(R.string.glamour_refresh_detail))
+                }
+            }
+        }
+        if (detail.isCouponEligible && (detail.isCouponClaimed || !detail.couponInviteCode.isNullOrBlank())) item {
+            Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(stringResource(R.string.glamour_coupon), style = MaterialTheme.typography.titleMedium)
+                    if (detail.isCouponClaimed) {
+                        Text(stringResource(R.string.glamour_coupon_claimed))
+                    } else {
+                        if (!detail.isFollowingAuthor) Text(stringResource(R.string.glamour_coupon_follow_hint))
+                        Button(onClick = onClaimCoupon, enabled = !interactions.isClaimingCoupon && !isMutating) {
+                            Text(stringResource(if (detail.isFollowingAuthor) R.string.glamour_claim_coupon else R.string.glamour_follow_claim_coupon))
+                        }
+                    }
+                    if (interactions.isClaimingCoupon) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    interactions.couponError?.let { Text(glamourErrorMessage(it), color = MaterialTheme.colorScheme.error) }
+                    if (interactions.couponClaimedNotice || interactions.couponError != null) {
+                        TextButton(onClick = onClearCouponNotice) { Text(stringResource(R.string.glamour_dismiss)) }
+                    }
                 }
             }
         }
@@ -817,7 +990,7 @@ private fun GlamourRecoverableMessage(
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
-            text = message ?: stringResource(R.string.glamour_unavailable),
+            text = glamourErrorMessage(message),
             style = MaterialTheme.typography.bodyLarge,
         )
         Spacer(Modifier.height(12.dp))
@@ -844,7 +1017,7 @@ private fun GlamourInlineError(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(message, modifier = Modifier.weight(1f))
+            Text(glamourErrorMessage(message), modifier = Modifier.weight(1f))
             if (actionLabel != null && onAction != null) {
                 TextButton(onClick = onAction) {
                     Text(actionLabel)
@@ -878,10 +1051,90 @@ private fun GlamourMessage(
     }
 }
 
-private fun top.cxmeow.risingstones.feature.glamour.domain.GlamourAuthor.displayLine(): String =
-    listOf(characterName, areaName, groupName).filter(String::isNotBlank).joinToString(" · ")
+@Composable
+internal fun glamourErrorMessage(message: String?): String = stringResource(when (message) {
+    top.cxmeow.risingstones.feature.glamour.domain.GlamourException.AuthenticationRequired.message -> R.string.glamour_identity_required
+    top.cxmeow.risingstones.feature.glamour.domain.GlamourException.MissingDefaultFavoriteFolder.message -> R.string.glamour_folder_unavailable
+    else -> R.string.glamour_unavailable
+})
 
 private val GlamourDyeLabel: (top.cxmeow.risingstones.feature.glamour.domain.GlamourDye) -> String =
     { it.name }
 
 private val DetailDateFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+
+
+/** Standalone detail; state survives configuration changes and is cleared when the route closes. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RisingStonesGlamourDetailScreen(
+    service: GlamourService,
+    id: Int,
+    onNavigateBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    require(id > 0)
+    val owner: GlamourDetailRouteStore = viewModel(
+        key = "rising-stones-glamour-detail-${System.identityHashCode(service)}-$id",
+        factory = GlamourDetailRouteStoreFactory,
+    )
+    val activity = LocalContext.current.findActivity()
+    DisposableEffect(owner, activity) {
+        onDispose { if (activity?.isChangingConfigurations != true) owner.viewModelStore.clear() }
+    }
+    val viewModel: GlamourViewModel = viewModel(
+        viewModelStoreOwner = owner,
+        factory = remember(service) { GlamourViewModelFactory(service, autoLoadList = false) },
+    )
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val detailScrollState = rememberLazyListState()
+    val canRead = service.hasCommunityIdentity
+    val interactions by viewModel.interactionState.collectAsStateWithLifecycle()
+    LaunchedEffect(viewModel, id, canRead) {
+        if (canRead) {
+            viewModel.selectDetail(id)
+        }
+    }
+    var authorId by rememberSaveable(id) { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    authorId?.let { selectedAuthorId ->
+        val author = state.selectedDetail?.author?.takeIf { it.id == selectedAuthorId }
+            ?: GlamourAuthor(selectedAuthorId, "", "", "", null)
+        RisingStonesGlamourAuthorScreen(service, author, { authorId = null }, modifier)
+        return
+    }
+    if (interactions.favoriteTargetId != null) GlamourFavoritePicker(state, interactions, viewModel)
+    BackHandler(onBack = onNavigateBack)
+    Scaffold(modifier = modifier, topBar = {
+        TopAppBar(
+            title = { Text(stringResource(R.string.glamour_title)) },
+            navigationIcon = {
+                TextButton(onClick = onNavigateBack) { Text(stringResource(R.string.glamour_back)) }
+            },
+        )
+    }) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
+            Box(Modifier.widthIn(max = 960.dp).fillMaxSize()) {
+                if (canRead) GlamourDetailPane(state, viewModel, showBack = false,
+                    onAuthor = { authorId = it.id?.takeIf(String::isNotBlank) }, modifier = Modifier.fillMaxSize(),
+                    scrollState = detailScrollState)
+                else GlamourMessage(stringResource(R.string.glamour_identity_required), Modifier.fillMaxSize())
+            }
+        }
+    }
+}
+
+private class GlamourDetailRouteStore : ViewModel(), ViewModelStoreOwner {
+    override val viewModelStore = ViewModelStore()
+    override fun onCleared() { viewModelStore.clear() }
+}
+
+private object GlamourDetailRouteStoreFactory : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>): T = GlamourDetailRouteStore() as T
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> if (baseContext === this) null else baseContext.findActivity()
+    else -> null
+}

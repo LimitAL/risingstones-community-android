@@ -88,6 +88,15 @@ android {
 }
 
 dependencies {
+    implementation(project(":guild-domain"))
+    implementation(project(":guild-data"))
+    implementation(project(":guild-presentation"))
+    implementation(project(":guild-ui-compose"))
+    implementation(project(":profile-domain"))
+    implementation(project(":profile-data"))
+    implementation(project(":profile-presentation"))
+    implementation(project(":profile-ui-compose"))
+
     implementation(project(":account-data"))
     implementation(project(":account-presentation"))
     implementation(project(":account-ui-compose"))
@@ -95,6 +104,14 @@ dependencies {
     implementation(project(":network"))
     implementation(project(":auth-webview"))
     implementation(project(":ui-compose"))
+    implementation(project(":message-domain"))
+    implementation(project(":message-data"))
+    implementation(project(":message-presentation"))
+    implementation(project(":message-ui-compose"))
+    implementation(project(":dynamic-data"))
+    implementation(project(":dynamic-domain"))
+    implementation(project(":dynamic-presentation"))
+    implementation(project(":dynamic-ui-compose"))
     implementation(project(":forum-domain"))
     implementation(project(":forum-data"))
     implementation(project(":forum-presentation"))
@@ -103,6 +120,7 @@ dependencies {
     implementation(project(":glamour-ui-compose"))
     implementation(project(":personal-data-data"))
     implementation(project(":personal-data-ui-compose"))
+    implementation(project(":recruitment-presentation"))
     implementation(project(":recruitment-data"))
     implementation(project(":recruitment-ui-compose"))
     implementation(libs.androidx.activity.compose)
@@ -116,6 +134,12 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(platform(libs.okhttp.bom))
     implementation(libs.okhttp)
+
+    testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

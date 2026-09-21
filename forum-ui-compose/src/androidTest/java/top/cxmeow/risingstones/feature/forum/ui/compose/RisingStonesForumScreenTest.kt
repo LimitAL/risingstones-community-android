@@ -11,8 +11,15 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumBrowsingService
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumBrowseQuery
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumBrowsePage
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumCategory
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumContentKind
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumFeedFilter
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumAuthor
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumComment
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumCommentDraft
@@ -39,7 +46,7 @@ class RisingStonesForumScreenTest {
 
     @Test
     fun compactSelectionReplacesTheListWithDetail() {
-        showAtWidth(400.dp)
+        showAtWidth(599.dp)
         waitFor("Topic")
 
         composeRule.onNodeWithText("Topic").performClick()
@@ -51,7 +58,7 @@ class RisingStonesForumScreenTest {
 
     @Test
     fun mediumSelectionKeepsTheListBesideDetail() {
-        showAtWidth(700.dp)
+        showAtWidth(600.dp)
         waitFor("Topic")
 
         composeRule.onNodeWithText("Topic").performClick()
@@ -63,7 +70,7 @@ class RisingStonesForumScreenTest {
 
     @Test
     fun expandedSelectionKeepsTheListBesideDetail() {
-        showAtWidth(900.dp)
+        showAtWidth(840.dp)
         waitFor("Topic")
 
         composeRule.onNodeWithText("Topic").performClick()
@@ -71,6 +78,31 @@ class RisingStonesForumScreenTest {
 
         composeRule.onNodeWithText("Excerpt").assertExists()
         composeRule.onNodeWithText("Body text").assertExists()
+    }
+
+    @Test
+    fun upperMediumBoundaryKeepsListAndDetail() {
+        showAtWidth(839.dp)
+        waitFor("Topic")
+        composeRule.onNodeWithText("Topic").performClick()
+        waitFor("Body text")
+        composeRule.onNodeWithText("Excerpt").assertExists()
+    }
+
+    @Test
+    fun guideChildCategoryAndFeedFiltersUseSeparateRequests() {
+        showAtWidth(600.dp)
+        waitFor("Topic")
+        composeRule.onNodeWithText("Newest posts").performClick()
+        composeRule.waitUntil { FakeOfficialForumService.lastQuery?.filter == OfficialForumFeedFilter.Latest }
+        composeRule.onNodeWithText("Guides").performClick()
+        waitFor("Battle")
+        composeRule.onNodeWithText("Battle").performClick()
+        waitFor("Job")
+        composeRule.onNodeWithText("Job").performClick()
+        composeRule.waitUntil { FakeOfficialForumService.lastQuery?.list?.partIds == listOf(8) }
+        assertEquals(OfficialForumContentKind.Guide, FakeOfficialForumService.lastQuery?.list?.contentKind)
+        assertEquals(OfficialForumFeedFilter.Default, FakeOfficialForumService.lastQuery?.filter)
     }
 
     @Test
@@ -111,7 +143,22 @@ class RisingStonesForumScreenTest {
     }
 }
 
-private object FakeOfficialForumService : OfficialForumService {
+internal object FakeOfficialForumService : OfficialForumBrowsingService {
+    var lastQuery: OfficialForumBrowseQuery? = null
+    override suspend fun fetchCategories(kind: OfficialForumContentKind) =
+        if (kind == OfficialForumContentKind.Guide) listOf(
+            OfficialForumCategory(OfficialForumPartFilter(3, "Battle", 1),
+                listOf(OfficialForumCategory(OfficialForumPartFilter(8, "Job", 0)))))
+        else listOf(OfficialForumCategory(OfficialForumPartFilter(8, "News", 1)))
+
+    override suspend fun fetchBrowsePage(query: OfficialForumBrowseQuery): OfficialForumBrowsePage {
+        lastQuery = query
+        return OfficialForumBrowsePage(fetchPosts(query.list), null)
+    }
+
+    override suspend fun searchBrowsePage(query: OfficialForumSearchQuery, pageTime: String?) =
+        OfficialForumBrowsePage(searchPosts(query), null)
+
     override val canPerformAuthenticatedWrites = false
 
     override suspend fun fetchParts() = listOf(OfficialForumPartFilter(8, "News", 1))

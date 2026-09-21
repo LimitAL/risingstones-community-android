@@ -1,5 +1,9 @@
 package top.cxmeow.risingstones.feature.forum.presentation
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -8,6 +12,11 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumBrowsingService
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumBrowseQuery
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumBrowsePage
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumCategory
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumFeedFilter
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumAuthor
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumComment
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumCommentDraft
@@ -31,6 +40,62 @@ import java.time.Instant
 @OptIn(ExperimentalCoroutinesApi::class)
 class OfficialForumViewModelsTest {
     @get:Rule val mainDispatcherRule = MainDispatcherRule()
+
+    @Test
+    fun guideCategoriesFilterByChildAndForwardPaginationCursor() = runTest {
+        val service = BrowsingService()
+        val model = OfficialForumListViewModel(service)
+        model.ensureLoaded()
+        advanceUntilIdle()
+        model.loadMore()
+        advanceUntilIdle()
+        assertEquals("cursor-1", service.queries.last().pageTime)
+        model.setContentKind(OfficialForumContentKind.Guide)
+        advanceUntilIdle()
+        assertEquals(listOf(3), model.state.value.parts.map { it.id })
+        assertEquals(8, model.browsingState.value.categories.single().children.single().part.id)
+        model.togglePart(8)
+        advanceUntilIdle()
+        assertEquals(listOf(8), service.queries.last().list.partIds)
+        assertEquals(null, service.queries.last().pageTime)
+        model.setFeedFilter(OfficialForumFeedFilter.Refined)
+        advanceUntilIdle()
+        assertEquals(OfficialForumFeedFilter.Refined, service.queries.last().filter)
+    }
+
+    @Test
+    fun latePaginationCannotPolluteChangedContentKind() = runTest {
+        val service = BrowsingService().apply { delayedPage = CompletableDeferred() }
+        val model = OfficialForumListViewModel(service)
+        model.ensureLoaded()
+        runCurrent()
+        model.loadMore()
+        runCurrent()
+        model.setContentKind(OfficialForumContentKind.Guide)
+        runCurrent()
+        service.delayedPage!!.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(OfficialForumContentKind.Guide, model.state.value.contentKind)
+        assertEquals(listOf(84), model.state.value.posts.map { it.id })
+        assertEquals(1, model.state.value.page)
+        assertFalse(model.state.value.isLoadingMore)
+    }
+
+    @Test
+    fun categoryFailureCanRetryWithoutDiscardingListAndRefreshKeepsSelection() = runTest {
+        val service = BrowsingService().apply { failCategories = true }
+        val model = OfficialForumListViewModel(service)
+        model.ensureLoaded()
+        advanceUntilIdle()
+        assertEquals(OfficialForumLoadStatus.Loaded, model.state.value.status)
+        assertEquals(OfficialForumLoadStatus.Failed, model.browsingState.value.categoryStatus)
+        model.selectPostId(84)
+        service.failCategories = false
+        model.refresh()
+        advanceUntilIdle()
+        assertEquals(OfficialForumLoadStatus.Loaded, model.browsingState.value.categoryStatus)
+        assertEquals(84, model.state.value.selectedPostId)
+    }
 
     @Test
     fun listLoadsPartsSubmitsSearchAndSwitchesGuideContract() = runTest {
@@ -191,7 +256,7 @@ class OfficialForumViewModelsTest {
 }
 
 private class FakeOfficialForumService : OfficialForumService {
-    override val canPerformAuthenticatedWrites = false
+    override val canPerformAuthenticatedWrites = true
     var failReads = false
     var failSubComments = false
     val listQueries = mutableListOf<OfficialForumListQuery>()
@@ -280,4 +345,24 @@ private val COMMENT = OfficialForumComment(
 )
 private val CHILDREN = (1..4).map { index ->
     COMMENT.copy(id = 90 + index, bodyText = "Child $index", childCount = 0, isPostAuthor = false)
+}
+
+private class BrowsingService : OfficialForumBrowsingService, OfficialForumService by FakeOfficialForumService() {
+    val queries = mutableListOf<OfficialForumBrowseQuery>()
+    var delayedPage: CompletableDeferred<Unit>? = null
+    var failCategories = false
+    override suspend fun fetchCategories(kind: OfficialForumContentKind): List<OfficialForumCategory> {
+        if (failCategories) error("offline")
+        return listOf(OfficialForumCategory(OfficialForumPartFilter(3, "Battle", 1),
+            listOf(OfficialForumCategory(OfficialForumPartFilter(8, "Job", 0)))))
+    }
+    override suspend fun fetchBrowsePage(query: OfficialForumBrowseQuery): OfficialForumBrowsePage {
+        queries += query
+        if (query.list.page > 1) withContext(NonCancellable) { delayedPage?.await() }
+        val id = if (query.list.contentKind == OfficialForumContentKind.Guide) 84 else 42
+        return OfficialForumBrowsePage(OfficialForumPage(listOf(POST.copy(id = id)), 40, query.list.page),
+            "cursor-${query.list.page}")
+    }
+    override suspend fun searchBrowsePage(query: OfficialForumSearchQuery, pageTime: String?) =
+        OfficialForumBrowsePage(OfficialForumPage(listOf(POST), 1, query.page), pageTime)
 }

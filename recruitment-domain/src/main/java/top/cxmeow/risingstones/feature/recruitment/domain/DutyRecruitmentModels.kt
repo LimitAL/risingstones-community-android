@@ -7,12 +7,26 @@ enum class DutyRecruitmentPosition(val wireValue: String) {
     Damage1("D1"), Damage2("D2"), Damage3("D3"), Damage4("D4");
 
     companion object {
+        fun optionsForTeamComposition(teamComposition: String): List<DutyRecruitmentPosition> =
+            when (teamComposition.trim()) {
+                "满编小队", "团队" -> listOf(MainTank, SubTank, Healer1, Healer2, Damage1, Damage2, Damage3, Damage4)
+                "轻锐小队" -> listOf(Tank, Healer, Damage1, Damage2)
+                else -> emptyList()
+            }
+
         fun options(dutyType: String) = if (dutyType.trim() == "多变迷宫") {
             listOf(Tank, Healer, Damage1, Damage2)
         } else {
             listOf(MainTank, SubTank, Healer1, Healer2, Damage1, Damage2, Damage3, Damage4)
         }
     }
+}
+
+fun dutyRecruitmentTeamCompositionForType(type: String): String = when (type.trim()) {
+    "绝境战", "零式" -> "满编小队"
+    "多变迷宫" -> "轻锐小队"
+    "诛灭战" -> "团队"
+    else -> ""
 }
 
 data class DutyRecruitmentListQuery(
@@ -104,9 +118,9 @@ data class DutyRecruitmentCatalogs(
     val duties: List<DutyRecruitmentDutyConfig> = emptyList(),
 ) {
     val dutyTypes: List<String>
-        get() = duties.sortedBy(DutyRecruitmentDutyConfig::weight).map { it.dutyType }.distinct()
+        get() = duties.map { it.dutyType }.distinct()
     fun dutyNames(type: String) = duties.filter { type.isBlank() || it.dutyType == type }
-        .sortedBy(DutyRecruitmentDutyConfig::weight).map { it.dutyName }.distinct()
+        .sortedByDescending(DutyRecruitmentDutyConfig::weight).map { it.dutyName }.distinct()
 }
 
 enum class CommunityRecruitmentKind(val listEndpoint: String, val detailEndpoint: String) {

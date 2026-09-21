@@ -2,9 +2,12 @@ package top.cxmeow.risingstones.network
 
 import kotlinx.coroutines.CancellationException
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okio.BufferedSink
 import okhttp3.coroutines.executeAsync
 import java.io.IOException
 
@@ -64,14 +67,40 @@ class OkHttpRisingStonesHttpClient(
     private val client: OkHttpClient,
     private val defaultHeaders: Map<String, String> = emptyMap(),
 ) : RisingStonesHttpClient {
+    private val writeClient = client.newBuilder()
+        .retryOnConnectionFailure(false)
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .authenticator(okhttp3.Authenticator.NONE)
+        .proxyAuthenticator(okhttp3.Authenticator.NONE)
+        .build()
+
+    // Storage has its own short-lived authorization. A host application's cookie jar,
+    // interceptors and default login headers must not accompany the signed upload.
+    private val storageClient = writeClient.newBuilder()
+        .cookieJar(okhttp3.CookieJar.NO_COOKIES)
+        .apply { interceptors().clear(); networkInterceptors().clear() }
+        .build()
+
     override suspend fun execute(request: RisingStonesHttpRequest): RisingStonesHttpResponse {
+        val storageRequest: Boolean
         val okHttpRequest = try {
-            request.toOkHttpRequest(defaultHeaders)
+            storageRequest = request.url.toHttpUrl().host == "ff14risingstones.gcloud.com.cn"
+            if (storageRequest) request.copy(headers = request.headers.filterKeys {
+                it.lowercase(java.util.Locale.ROOT) in setOf(
+                    "authorization", "x-cos-security-token", "content-type", "content-length",
+                )
+            }).toOkHttpRequest(emptyMap()) else request.toOkHttpRequest(defaultHeaders)
         } catch (error: IllegalArgumentException) {
             throw RisingStonesHttpException.InvalidRequest(error)
         }
         val response = try {
-            client.newCall(okHttpRequest).executeAsync()
+            val transport = when {
+                storageRequest -> storageClient
+                request.method in setOf(RisingStonesHttpMethod.Get, RisingStonesHttpMethod.Head) -> client
+                else -> writeClient
+            }
+            transport.newCall(okHttpRequest).executeAsync()
         } catch (error: CancellationException) {
             throw error
         } catch (error: IOException) {
@@ -95,11 +124,20 @@ private fun RisingStonesHttpRequest.toOkHttpRequest(
     defaultHeaders: Map<String, String>,
 ): Request {
     val builder = Request.Builder().url(url)
-    buildMap {
-        putAll(defaultHeaders)
-        putAll(headers)
-    }.forEach(builder::header)
-    val requestBody = body?.toRequestBody(contentType.toMediaType())
+    // OkHttp replaces header names case-insensitively. Apply explicit session headers last so
+    // a differently cased default cannot replace the User-Agent paired with the login Cookie.
+    defaultHeaders.forEach(builder::header)
+    headers.forEach(builder::header)
+    // A one-shot body also prevents automatic HTTP 408/503 follow-up attempts.
+    val requestBody = if (method in setOf(RisingStonesHttpMethod.Get, RisingStonesHttpMethod.Head)) null else
+        object : RequestBody() {
+            private val delegate = body?.toRequestBody(contentType.toMediaType())
+                ?: ByteArray(0).toRequestBody()
+            override fun contentType() = delegate.contentType()
+            override fun contentLength() = delegate.contentLength()
+            override fun isOneShot() = true
+            override fun writeTo(sink: BufferedSink) = delegate.writeTo(sink)
+        }
     when (method) {
         RisingStonesHttpMethod.Get -> builder.get()
         RisingStonesHttpMethod.Post -> builder.post(requestBody ?: ByteArray(0).toRequestBody())

@@ -18,6 +18,55 @@ import top.cxmeow.risingstones.network.RisingStonesSessionValidator
 
 class RisingStonesAccountSessionValidatorTest {
     @Test
+    fun accepted10002ProbeAddsOnlyAccountReadAndPreservesBaseCapabilities() = runBlocking {
+        val validator = RisingStonesAccountSessionValidator(
+            baseValidator = RisingStonesSessionValidator {
+                RisingStonesSessionValidation(
+                    displayName = "Base name",
+                    code = 10002,
+                    capabilities = setOf(RisingStonesCapability.GlamourAuthenticated),
+                )
+            },
+            client = RisingStonesPublicApiClient(
+                transport = ValidationTransport("""{"code":10002,"msg":"未登录","data":{}}"""),
+                baseUrls = listOf("https://rising.test"),
+            ),
+        )
+
+        val result = validator.validateSession(RisingStonesRequestAuthorizer { _, _ -> })
+
+        assertEquals("Base name", result.displayName)
+        assertEquals(10002, result.code)
+        assertEquals(
+            setOf(RisingStonesCapability.GlamourAuthenticated, RisingStonesCapability.AccountRead),
+            result.capabilities,
+        )
+    }
+
+    @Test
+    fun acceptedCodeWithoutAccountObjectDoesNotGrantReadCapability() {
+        for (code in listOf(10000, 10002)) {
+            for (data in listOf("", ",\"data\":null", ",\"data\":[]")) {
+                val validator = RisingStonesAccountSessionValidator(
+                    baseValidator = RisingStonesSessionValidator {
+                        RisingStonesSessionValidation(displayName = null, code = 10000)
+                    },
+                    client = RisingStonesPublicApiClient(
+                        transport = ValidationTransport("""{"code":$code$data}"""),
+                        baseUrls = listOf("https://rising.test"),
+                    ),
+                )
+
+                val failure = assertThrows(RisingStonesApiException::class.java) {
+                    runBlocking { validator.validateSession(RisingStonesRequestAuthorizer { _, _ -> }) }
+                }
+
+                assertEquals(code, failure.code)
+            }
+        }
+    }
+
+    @Test
     fun accountReadIsGrantedOnlyAfterTheOfficialReadEndpointSucceeds() = runBlocking {
         var context: RisingStonesRequestContext? = null
         val validator = RisingStonesAccountSessionValidator(

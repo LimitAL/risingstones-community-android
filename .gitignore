@@ -19,6 +19,10 @@ google-services.json
 .env
 .env.*
 
+# 本机浏览器调研产物不进入公开源码
+.playwright-cli/
+output/playwright/
+
 # 仅供本地 AI 开发工具读取，不进入公开仓库
 AGENTS.md
 

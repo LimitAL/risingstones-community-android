@@ -25,7 +25,7 @@ import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentListPag
 import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentListQuery
 import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentPosition
 import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentRoleCounts
-import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentService
+import top.cxmeow.risingstones.feature.recruitment.domain.RecruitmentInteractionService
 import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentSummary
 import top.cxmeow.risingstones.feature.recruitment.domain.RolePlayRecruitmentCard
 import top.cxmeow.risingstones.feature.recruitment.domain.RolePlayRecruitmentMember
@@ -43,7 +43,7 @@ class DutyRecruitmentViewModelTest {
     @Test
     fun dutyBoardLoadsCatalogFiltersAndUniqueNextPage() = runTest {
         val service = FakeDutyRecruitmentService()
-        val viewModel = DutyRecruitmentViewModel(service)
+        val viewModel = DutyRecruitmentViewModel(eligible(service))
         advanceUntilIdle()
 
         assertEquals(listOf(1, 2), viewModel.state.value.dutyItems.map { it.id })
@@ -63,7 +63,7 @@ class DutyRecruitmentViewModelTest {
     @Test
     fun beginnerBoardLoadsDedicatedDetailAndSubmitsResponse() = runTest {
         val service = FakeDutyRecruitmentService()
-        val viewModel = DutyRecruitmentViewModel(service)
+        val viewModel = DutyRecruitmentViewModel(eligible(service))
         advanceUntilIdle()
 
         viewModel.selectBoard(RecruitmentBoardKind.Beginner)
@@ -86,7 +86,7 @@ class DutyRecruitmentViewModelTest {
     @Test
     fun rolePlayDetailLoadsMembersRatingsReviewsLikesRepliesAndNextPage() = runTest {
         val service = FakeDutyRecruitmentService()
-        val viewModel = DutyRecruitmentViewModel(service)
+        val viewModel = DutyRecruitmentViewModel(eligible(service))
         advanceUntilIdle()
         viewModel.selectBoard(RecruitmentBoardKind.RolePlay)
         advanceUntilIdle()
@@ -116,7 +116,7 @@ class DutyRecruitmentViewModelTest {
     @Test
     fun refreshFailureRetainsConfirmedListAndReportsInlineError() = runTest {
         val service = FakeDutyRecruitmentService()
-        val viewModel = DutyRecruitmentViewModel(service)
+        val viewModel = DutyRecruitmentViewModel(eligible(service))
         advanceUntilIdle()
 
         service.failDutyList = true
@@ -124,7 +124,7 @@ class DutyRecruitmentViewModelTest {
         advanceUntilIdle()
 
         assertEquals(listOf(1, 2), viewModel.state.value.dutyItems.map { it.id })
-        assertEquals("list unavailable", viewModel.state.value.listError)
+        assertEquals("Failed", viewModel.state.value.listError)
         assertFalse(viewModel.state.value.isRefreshing)
         assertNull(viewModel.state.value.detailError)
     }
@@ -132,7 +132,7 @@ class DutyRecruitmentViewModelTest {
     @Test
     fun detailRefreshFailureRetainsConfirmedDetailWithoutPollutingListState() = runTest {
         val service = FakeDutyRecruitmentService()
-        val viewModel = DutyRecruitmentViewModel(service)
+        val viewModel = DutyRecruitmentViewModel(eligible(service))
         advanceUntilIdle()
         viewModel.selectDetail(1)
         advanceUntilIdle()
@@ -142,14 +142,14 @@ class DutyRecruitmentViewModelTest {
         advanceUntilIdle()
 
         assertEquals(1, viewModel.state.value.dutyDetail?.summary?.id)
-        assertEquals("detail unavailable", viewModel.state.value.detailError)
+        assertEquals("Failed", viewModel.state.value.detailError)
         assertNull(viewModel.state.value.listError)
     }
 
     @Test
     fun responseFailureKeepsEditorStateAndDoesNotMarkRecruitmentResponded() = runTest {
         val service = FakeDutyRecruitmentService()
-        val viewModel = DutyRecruitmentViewModel(service)
+        val viewModel = DutyRecruitmentViewModel(eligible(service))
         advanceUntilIdle()
         viewModel.selectBoard(RecruitmentBoardKind.Beginner)
         advanceUntilIdle()
@@ -160,7 +160,7 @@ class DutyRecruitmentViewModelTest {
         viewModel.respond("QQ 123")
         advanceUntilIdle()
 
-        assertEquals("response unavailable", viewModel.state.value.responseError)
+        assertEquals("Failed", viewModel.state.value.responseError)
         assertFalse(viewModel.state.value.communityDetail?.summary?.beginner?.isResponded == true)
         assertNull(viewModel.state.value.notice)
     }
@@ -168,7 +168,7 @@ class DutyRecruitmentViewModelTest {
     @Test
     fun standaloneDetailDoesNotFetchItsBoardList() = runTest {
         val service = FakeDutyRecruitmentService()
-        val viewModel = DutyRecruitmentViewModel(service, autoLoadList = false)
+        val viewModel = DutyRecruitmentViewModel(eligible(service), autoLoadList = false)
         advanceUntilIdle()
         viewModel.selectBoard(RecruitmentBoardKind.Duty, loadList = false)
         viewModel.selectDetail(42)
@@ -181,7 +181,7 @@ class DutyRecruitmentViewModelTest {
     @Test
     fun clearingSelectionRemovesDetailWithoutDiscardingTheList() = runTest {
         val service = FakeDutyRecruitmentService()
-        val viewModel = DutyRecruitmentViewModel(service)
+        val viewModel = DutyRecruitmentViewModel(eligible(service))
         advanceUntilIdle()
         viewModel.selectDetail(1)
         advanceUntilIdle()
@@ -194,7 +194,8 @@ class DutyRecruitmentViewModelTest {
     }
 }
 
-private class FakeDutyRecruitmentService : DutyRecruitmentService {
+internal class FakeDutyRecruitmentService : RecruitmentInteractionService {
+    override val canPerformAuthenticatedWrites = true
     override val hasCommunityIdentity = true
     val dutyQueries = mutableListOf<DutyRecruitmentListQuery>()
     val communityQueries = mutableListOf<CommunityRecruitmentQuery>()
@@ -270,13 +271,13 @@ private class FakeDutyRecruitmentService : DutyRecruitmentService {
     override suspend fun likeRolePlayReview(id: String) = 1
 }
 
-private fun dutySummary(id: Int) = DutyRecruitmentSummary(
+internal fun dutySummary(id: Int) = DutyRecruitmentSummary(
     id, "author", null, "Hero", "陆行鸟", "红玉海", "陆行鸟", "High-end", "Omega",
     "8-player", "P2", "20:00", "Standard", null, null, 2, 1, emptyList(), emptyList(),
     emptyList(), DutyRecruitmentRoleCounts(mt = 1, h1 = 1), Instant.parse("2026-07-21T00:00:00Z"),
 )
 
-private fun beginnerSummary(): CommunityRecruitmentSummary {
+internal fun beginnerSummary(): CommunityRecruitmentSummary {
     val card = BeginnerRecruitmentCard(
         "New Hero", "陆行鸟 · 红玉海", BeginnerRecruitmentIdentity.Newcomer, "Learning party",
         "Welcome", emptyList(), "陆行鸟 · 红玉海", null, null, false, null,
@@ -287,7 +288,7 @@ private fun beginnerSummary(): CommunityRecruitmentSummary {
     )
 }
 
-private fun rolePlaySummary(): CommunityRecruitmentSummary {
+internal fun rolePlaySummary(): CommunityRecruitmentSummary {
     val card = RolePlayRecruitmentCard("Cafe Moon", listOf(RolePlayRecruitmentType.Light), "Cafe", "20:00", emptyList(), null)
     return CommunityRecruitmentSummary(
         14, CommunityRecruitmentKind.RolePlay, card.name, "Owner", null, null, null, card.profile, null,
@@ -295,6 +296,6 @@ private fun rolePlaySummary(): CommunityRecruitmentSummary {
     )
 }
 
-private fun review(id: String) = RolePlayRecruitmentReview(
+internal fun review(id: String) = RolePlayRecruitmentReview(
     id, "Visitor", null, null, "Good", "5", 2, false, null, emptyList(), 1,
 )

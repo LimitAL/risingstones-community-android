@@ -1,0 +1,8 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity
+            android:name="top.cxmeow.risingstones.feature.forum.ui.compose.ForumInteractionTestActivity"
+            android:exported="false" />
+        <activity android:name="top.cxmeow.risingstones.feature.forum.ui.compose.ForumCommentEditorTestActivity" android:exported="false" />
+    </application>
+</manifest>

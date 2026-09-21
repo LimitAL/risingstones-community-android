@@ -12,4 +12,8 @@ class AuthWebViewApiBoundary(
         store = store,
         sessionValidator = validator,
     )
+    val credentialRevision: kotlinx.coroutines.flow.StateFlow<Long> = provider.credentialRevision
 }
+
+fun publishedExplicitProvider(provider: RisingStonesWebCookieSessionProvider):
+    top.cxmeow.risingstones.core.auth.RisingStonesExplicitCapabilityProvider = provider

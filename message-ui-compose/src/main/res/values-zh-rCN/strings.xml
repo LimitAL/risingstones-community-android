@@ -1,0 +1,34 @@
+<resources>
+    <string name="message_title">消息</string>
+    <string name="message_back">返回</string>
+    <string name="message_select">选择消息类别</string>
+    <string name="message_read_notice">打开类别会更新对应的未读状态。</string>
+    <string name="message_sign_in">请使用已验证的会话登录后查看消息。</string>
+    <string name="message_unread">%1$d 条未读</string>
+    <string name="message_refresh_counts">刷新未读数</string>
+    <string name="message_refresh">刷新</string>
+    <string name="message_received">评论我的</string>
+    <string name="message_sent">我发布的</string>
+    <string name="message_empty">此类别暂无消息</string>
+    <string name="message_more">加载更多</string>
+    <string name="message_contact">联系方式</string>
+    <string name="message_image">消息图片</string>
+    <string name="message_source">查看来源</string>
+    <string name="message_official_link">打开官方页面</string>
+    <string name="message_category_unavailable">当前账号无法使用此消息类别。</string>
+    <string name="message_refresh_failed">刷新失败，已保留原消息。</string>
+    <string name="message_failed">消息加载失败。</string>
+    <string name="message_retry">重试</string>
+    <string name="message_system">系统消息</string>
+    <string name="message_mentions">提及我的</string>
+    <string name="message_comments">评论</string>
+    <string name="message_likes">点赞与收藏</string>
+    <string name="message_recruitment">招募消息</string>
+    <string name="message_responses">我回应的招募</string>
+    <string name="message_beginner">新人</string>
+    <string name="message_duty">副本</string>
+    <string name="message_guild">部队</string>
+    <string name="message_other">其他</string>
+    <string name="message_open_author">查看社区个人主页</string>
+    <string name="message_author_self">我</string>
+</resources>

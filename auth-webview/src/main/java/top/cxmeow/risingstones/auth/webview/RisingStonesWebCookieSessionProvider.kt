@@ -1,16 +1,28 @@
 package top.cxmeow.risingstones.auth.webview
 
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import top.cxmeow.risingstones.core.auth.RisingStonesAuthenticationRequirement
+import top.cxmeow.risingstones.core.auth.RisingStonesCapabilityAttempt
+import top.cxmeow.risingstones.core.auth.RisingStonesCapabilityAttemptGuard
+import top.cxmeow.risingstones.core.auth.RisingStonesCapabilityScope
+import top.cxmeow.risingstones.core.auth.RisingStonesCapabilityScopeProvider
+import top.cxmeow.risingstones.core.auth.RisingStonesExplicitCapabilityProvider
+import top.cxmeow.risingstones.core.auth.RisingStonesRequestContext
 import top.cxmeow.risingstones.core.auth.ObservableRisingStonesSessionProvider
 import top.cxmeow.risingstones.core.auth.RisingStonesCapability
 import top.cxmeow.risingstones.core.auth.RisingStonesRequestAuthorizer
 import top.cxmeow.risingstones.core.auth.RisingStonesSessionState
 import top.cxmeow.risingstones.network.RisingStonesApiException
+import top.cxmeow.risingstones.network.RisingStonesResponsePolicy
 import top.cxmeow.risingstones.network.RisingStonesSessionValidator
 
 class RisingStonesWebCookieSessionProvider(
@@ -19,11 +31,19 @@ class RisingStonesWebCookieSessionProvider(
     private val webCookieJar: RisingStonesWebCookieJar = RisingStonesWebCookieJar.NoOp,
     private val rejectionClassifier: RisingStonesCredentialRejectionClassifier =
         RisingStonesCredentialRejectionClassifier.Default,
-) : ObservableRisingStonesSessionProvider {
+) : ObservableRisingStonesSessionProvider, RisingStonesExplicitCapabilityProvider,
+    RisingStonesCapabilityScopeProvider {
     private val mutableSessionState = MutableStateFlow<RisingStonesSessionState>(
         RisingStonesSessionState.SignedOut,
     )
     private val mutationMutex = Mutex()
+    private var credentialGeneration = 0L
+    // A temporarily lost prerequisite must not revive an operation captured before revocation.
+    private var guildReadGeneration = 0L
+    private val mutableCredentialRevision = MutableStateFlow(0L)
+    /** Opaque lifecycle counter; lets hosts clear protected models even when state emissions conflate. */
+    val credentialRevision: StateFlow<Long> = mutableCredentialRevision.asStateFlow()
+    private var verifiedWrites = emptySet<RisingStonesCapability>()
 
     @Volatile
     private var credential: RisingStonesCookieCredential? = null
@@ -37,10 +57,23 @@ class RisingStonesWebCookieSessionProvider(
             .orEmpty()
 
     suspend fun restore() = mutationMutex.withLock {
+        val previousCredential = credential
+        val previousActive = mutableSessionState.value as? RisingStonesSessionState.Active
+        fun cancelRestore() {
+            credential = previousCredential
+            mutableSessionState.value = if (previousCredential != null && previousActive != null) {
+                previousActive.copy(capabilities = previousActive.capabilities.filterTo(mutableSetOf()) {
+                    prerequisiteFor(it) == null
+                })
+            } else RisingStonesSessionState.SignedOut
+        }
+        revokeVerifiedWrites()
+        credential = null
         mutableSessionState.value = RisingStonesSessionState.Restoring
         val restored = try {
             store.read()
         } catch (error: CancellationException) {
+            cancelRestore()
             throw error
         } catch (error: Exception) {
             credential = null
@@ -55,9 +88,10 @@ class RisingStonesWebCookieSessionProvider(
         try {
             validateAndActivate(restored, clearOnFailure = true)
         } catch (error: CancellationException) {
+            cancelRestore()
             throw error
         } catch (_: Exception) {
-            // validateAndActivate already cleared the rejected credential and exposed Invalid.
+            // Authorization remains unavailable. Only a confirmed rejection clears persistence.
         }
     }
 
@@ -75,6 +109,7 @@ class RisingStonesWebCookieSessionProvider(
     }
 
     suspend fun signOut(): Result<Unit> = mutationMutex.withLock {
+        revokeVerifiedWrites()
         credential = null
         mutableSessionState.value = RisingStonesSessionState.SignedOut
         try {
@@ -90,6 +125,167 @@ class RisingStonesWebCookieSessionProvider(
 
     override suspend fun currentAuthorizer(): RisingStonesRequestAuthorizer? =
         credential?.authorizer()
+
+    override suspend fun refreshAuthorizer(): RisingStonesRequestAuthorizer? =
+        mutationMutex.withLock {
+            val candidate = credential ?: return@withLock null
+            try {
+                val validation = sessionValidator.validateSession(candidate.authorizer())
+                if (RisingStonesCapability.GuildRead !in validation.capabilities) {
+                    guildReadGeneration++
+                }
+                verifiedWrites = verifiedWrites.filterTo(mutableSetOf()) {
+                    prerequisiteFor(it) in validation.capabilities
+                }
+                mutableSessionState.value = activeCookieSession(
+                    capabilities = validation.capabilities + verifiedWrites,
+                    displayName = validation.displayName,
+                )
+                candidate.authorizer()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (rejectionClassifier.isRejected(error)) {
+                    revokeVerifiedWrites()
+                    credential = null
+                    mutableSessionState.value = RisingStonesSessionState.Invalid(
+                        "Rising Stones session expired",
+                    )
+                    try {
+                        clearStoredAndWebCredentials()
+                    } catch (clearError: CancellationException) {
+                        throw clearError
+                    } catch (_: Exception) {
+                        // Memory authorization is already revoked even if persistence is unavailable.
+                    }
+                }
+                null
+            }
+        }
+
+    override fun canAttemptCapability(capability: RisingStonesCapability): Boolean =
+        credential != null && mutableSessionState.value is RisingStonesSessionState.Active &&
+            prerequisiteFor(capability)?.let { it in capabilities } == true
+
+    override suspend fun beginCapabilityAttempt(
+        context: RisingStonesRequestContext,
+    ): RisingStonesCapabilityAttempt? = mutationMutex.withLock {
+        createCapabilityAttempt(context)
+    }
+
+    override suspend fun captureCapabilityScope(
+        capabilities: Set<RisingStonesCapability>,
+    ): RisingStonesCapabilityScope? = mutationMutex.withLock {
+        currentCoroutineContext().ensureActive()
+        val requestedCapabilities = capabilities.toSet()
+        if (requestedCapabilities.isEmpty() || requestedCapabilities.any {
+                prerequisiteFor(it) != RisingStonesCapability.GuildRead || !canAttemptCapability(it)
+            }
+        ) return@withLock null
+        val capturedCredential = credential ?: return@withLock null
+        val generation = credentialGeneration
+        val guildGeneration = guildReadGeneration
+        object : RisingStonesCapabilityScope {
+            private val closed = AtomicBoolean(false)
+            private fun belongsToCurrentScope(): Boolean = !closed.get() &&
+                generation == credentialGeneration && credential === capturedCredential &&
+                guildGeneration == guildReadGeneration &&
+                requestedCapabilities.all(::canAttemptCapability)
+
+            override val authorizer = RisingStonesRequestAuthorizer { context, sink ->
+                mutationMutex.withLock {
+                    currentCoroutineContext().ensureActive()
+                    check(context.requirement == RisingStonesAuthenticationRequirement.Required &&
+                        context.capability == RisingStonesCapability.GuildRead && context.path.isNotBlank() &&
+                        belongsToCurrentScope()) {
+                        "Rising Stones operation authorization is no longer available"
+                    }
+                    capturedCredential.authorizer().authorize(context, sink)
+                }
+            }
+
+            override suspend fun isCurrent(): Boolean = mutationMutex.withLock {
+                currentCoroutineContext().ensureActive()
+                belongsToCurrentScope()
+            }
+
+            override suspend fun beginCapabilityAttempt(
+                context: RisingStonesRequestContext,
+            ): RisingStonesCapabilityAttempt? = mutationMutex.withLock {
+                currentCoroutineContext().ensureActive()
+                if (context.capability !in requestedCapabilities || !belongsToCurrentScope()) return@withLock null
+                createCapabilityAttempt(context, ::belongsToCurrentScope)
+            }
+
+            override fun close() { closed.set(true) }
+        }
+    }
+
+    /** Called only while holding mutationMutex; returned attempts recheck their binding on use. */
+    private fun createCapabilityAttempt(
+        context: RisingStonesRequestContext,
+        scopeIsCurrent: () -> Boolean = { true },
+    ): RisingStonesCapabilityAttempt? {
+        val capability = context.capability ?: return null
+        if (context.requirement != RisingStonesAuthenticationRequirement.Required ||
+            context.path.isBlank() || !canAttemptCapability(capability)
+        ) return null
+        val capturedCredential = credential ?: return null
+        val generation = credentialGeneration
+        val guildGeneration = guildReadGeneration
+        val requiresGuildRead = prerequisiteFor(capability) == RisingStonesCapability.GuildRead
+        return object : RisingStonesCapabilityAttempt, RisingStonesCapabilityAttemptGuard {
+            // 0 = unused, 1 = authorized once, 2 = closed or completed.
+            private val lifecycle = AtomicInteger(0)
+            private fun belongsToCurrentCredential() = generation == credentialGeneration &&
+                credential === capturedCredential && canAttemptCapability(capability) &&
+                (!requiresGuildRead || guildGeneration == guildReadGeneration) && scopeIsCurrent()
+
+            override suspend fun isCurrent(): Boolean = mutationMutex.withLock {
+                currentCoroutineContext().ensureActive()
+                lifecycle.get() == 1 && belongsToCurrentCredential()
+            }
+
+            override val authorizer = RisingStonesRequestAuthorizer { requested, sink ->
+                mutationMutex.withLock {
+                    currentCoroutineContext().ensureActive()
+                    check(requested == context && belongsToCurrentCredential() && lifecycle.compareAndSet(0, 1)) {
+                        "Rising Stones action authorization is no longer available"
+                    }
+                    capturedCredential.authorizer().authorize(requested, sink)
+                }
+            }
+
+            override suspend fun complete(): Boolean = mutationMutex.withLock {
+                currentCoroutineContext().ensureActive()
+                if (!belongsToCurrentCredential() || !lifecycle.compareAndSet(1, 2)) return@withLock false
+                val active = mutableSessionState.value as? RisingStonesSessionState.Active
+                    ?: return@withLock false
+                verifiedWrites = verifiedWrites + capability
+                mutableSessionState.value = active.copy(capabilities = active.capabilities + capability)
+                true
+            }
+
+            override fun close() { lifecycle.set(2) }
+        }
+    }
+
+    private fun revokeVerifiedWrites() {
+        credentialGeneration++
+        mutableCredentialRevision.value = credentialGeneration
+        verifiedWrites = emptySet()
+    }
+
+    private fun prerequisiteFor(capability: RisingStonesCapability): RisingStonesCapability? =
+        when (capability) {
+            RisingStonesCapability.DailySignIn,
+            RisingStonesCapability.ForumWrite,
+            RisingStonesCapability.RecruitmentWrite,
+            RisingStonesCapability.ForumImageUpload -> RisingStonesCapability.AccountRead
+            RisingStonesCapability.GuildWrite,
+            RisingStonesCapability.GuildImageUpload -> RisingStonesCapability.GuildRead
+            else -> null
+        }
 
     private suspend fun validateAndActivate(
         candidate: RisingStonesCookieCredential,
@@ -109,6 +305,7 @@ class RisingStonesWebCookieSessionProvider(
         try {
             val validation = sessionValidator.validateSession(candidate.authorizer())
             store.write(candidate)
+            revokeVerifiedWrites()
             credential = candidate
             mutableSessionState.value = activeCookieSession(
                 capabilities = validation.capabilities,
@@ -120,15 +317,18 @@ class RisingStonesWebCookieSessionProvider(
             throw error
         } catch (error: Exception) {
             if (clearOnFailure) {
+                revokeVerifiedWrites()
                 credential = null
                 mutableSessionState.value = RisingStonesSessionState.Invalid(error.message)
-                try {
-                    clearStoredAndWebCredentials()
-                } catch (clearError: CancellationException) {
-                    error.addSuppressed(clearError)
-                    throw clearError
-                } catch (clearError: Exception) {
-                    error.addSuppressed(clearError)
+                if (rejectionClassifier.isRejected(error)) {
+                    try {
+                        clearStoredAndWebCredentials()
+                    } catch (clearError: CancellationException) {
+                        error.addSuppressed(clearError)
+                        throw clearError
+                    } catch (clearError: Exception) {
+                        error.addSuppressed(clearError)
+                    }
                 }
             } else if (
                 previousCredential == null &&
@@ -181,10 +381,10 @@ fun interface RisingStonesCredentialRejectionClassifier {
         val Default = RisingStonesCredentialRejectionClassifier { error ->
             error.causeChain().any { cause ->
                 val code = (cause as? RisingStonesApiException)?.code
-                code in AuthenticationFailureCodes ||
+                !RisingStonesResponsePolicy.accepts(code) && (code in AuthenticationFailureCodes ||
                     AuthenticationFailureMessages.any(
                         cause.message.orEmpty().lowercase()::contains,
-                    )
+                    ))
             }
         }
 

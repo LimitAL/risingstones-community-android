@@ -1,5 +1,11 @@
 package top.cxmeow.risingstones.feature.personaldata.ui.compose
 
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataShareResourceService
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataShareKind
+import top.cxmeow.risingstones.feature.personaldata.presentation.PersonalDataShareInput
+import top.cxmeow.risingstones.feature.personaldata.presentation.PersonalDataShareUiState
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -22,6 +28,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -41,6 +49,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.key
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -50,6 +63,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -79,7 +93,19 @@ import top.cxmeow.risingstones.feature.personaldata.domain.UltimateEncounterDeta
 import top.cxmeow.risingstones.feature.personaldata.domain.UltimateEncounterSummary
 import top.cxmeow.risingstones.feature.personaldata.presentation.PersonalDataUiState
 import top.cxmeow.risingstones.feature.personaldata.presentation.PersonalDataViewModel
-import top.cxmeow.risingstones.feature.personaldata.presentation.PersonalDataViewModelFactory
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataReadingPage
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataReadingService
+import top.cxmeow.risingstones.feature.personaldata.presentation.PersonalDataReadingLoadStatus
+import top.cxmeow.risingstones.feature.personaldata.domain.ExplorationBoard
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataExplorationService
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataDashboardService
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataDashboardSectionKind
+import top.cxmeow.risingstones.feature.personaldata.presentation.PersonalDataDashboardLoadStatus
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataFrontlineService
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataFrontlineSection
+import top.cxmeow.risingstones.feature.personaldata.presentation.PersonalDataFrontlineLoadStatus
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataUltimateService
+import top.cxmeow.risingstones.feature.personaldata.presentation.PersonalDataUltimateLoadStatus
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -88,12 +114,198 @@ fun RisingStonesPersonalDataScreen(
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val viewModel: PersonalDataViewModel = viewModel(
-        key = "rising-stones-personal-data",
-        factory = remember(service) { PersonalDataViewModelFactory(service) },
-    )
-    val state by viewModel.state.collectAsStateWithLifecycle()
+    val owner: PersonalDataScreenModelOwner = viewModel(key = "personal-data-screen-owner") {
+        PersonalDataScreenModelOwner()
+    }
+    val models = owner.models(service)
+    key(models) { PersonalDataScreenContent(service, onNavigateBack, modifier, models) }
+}
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PersonalDataScreenContent(
+    service: PersonalDataService,
+    onNavigateBack: () -> Unit,
+    modifier: Modifier,
+    models: PersonalDataScreenModels,
+) {
+    val shareModel = models.share
+    val shareState by shareModel.state.collectAsStateWithLifecycle()
+    val shareResources = service as? PersonalDataShareResourceService
+    val shareHost = LocalPersonalDataShareHost.current
+    val shareContext = LocalContext.current
+    val shareConfiguration = LocalConfiguration.current
+    val shareRenderer = remember(shareResources, shareConfiguration) { shareResources?.let { AndroidPersonalDataShareRenderer(shareContext, it) } }
+    val viewModel = models.main
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val readingModel = models.reading
+    val readingState by readingModel.state.collectAsStateWithLifecycle()
+    val dashboardModel = models.dashboard
+    val dashboardState by dashboardModel.state.collectAsStateWithLifecycle()
+    val dashboardService = service as? PersonalDataDashboardService
+    val dashboardPages = rememberSaveableStateHolder()
+    val frontlineModel = models.frontline
+    val frontlineState by frontlineModel.state.collectAsStateWithLifecycle()
+    val frontlineService = service as? PersonalDataFrontlineService
+    val frontlinePages = rememberSaveableStateHolder()
+    val ultimateModel = models.ultimate
+    val ultimateState by ultimateModel.state.collectAsStateWithLifecycle()
+    val ultimateService = service as? PersonalDataUltimateService
+    var ultimatePageGeneration by rememberSaveable { mutableStateOf(0) }
+    val ultimatePages = key(ultimatePageGeneration) { rememberSaveableStateHolder() }
+    var authenticationRejected by rememberSaveable { mutableStateOf(false) }
+    val screenStates = rememberSaveableStateHolder()
+    val boardScroll = rememberSaveable(state.selectedBoard, saver = LazyListState.Saver) { LazyListState() }
+    val hubScroll = rememberLazyListState()
+    var explorationBoard by rememberSaveable { mutableStateOf<ExplorationBoard?>(null) }
+    val hasIdentity = viewModel.hasCommunityIdentity
+    val explorationOwner = models.exploration
+    LaunchedEffect(viewModel, hasIdentity) {
+        if (!hasIdentity) {
+            viewModel.clearProtectedContent()
+            explorationOwner.clearProtectedContent()
+            readingModel.clearProtectedContent()
+            dashboardModel.clearProtectedContent()
+            frontlineModel.clearProtectedContent()
+            ultimateModel.clearProtectedContent()
+            shareModel.clearProtectedContent()
+            ultimatePageGeneration++
+            PersonalDataDashboardSectionKind.entries.forEach { dashboardPages.removeState(it.name) }
+            PersonalDataFrontlineSection.entries.forEach { frontlinePages.removeState(it.name) }
+            authenticationRejected = false
+            screenStates.removeState("boards")
+            PersonalDataReadingPage.entries.forEach { screenStates.removeState("reading-${it.name}") }
+            explorationBoard = null
+            hubScroll.scrollToItem(0)
+        } else if (!authenticationRejected && viewModel.state.value == PersonalDataUiState()) {
+            viewModel.loadRoot()
+            viewModel.loadCatalogs()
+        }
+    }
+    val explorationAuthenticationFailed by explorationOwner.authenticationRejected.collectAsStateWithLifecycle()
+    val readingAuthenticationFailed = readingState.currentPageState.status == PersonalDataReadingLoadStatus.AuthRequired
+    val rootAuthenticationFailed = state.rootError == "authentication_required"
+    val dashboardAuthenticationFailed = dashboardState.currentSection.status == PersonalDataDashboardLoadStatus.AuthRequired
+    val frontlineAuthenticationFailed = frontlineState.currentSection.status == PersonalDataFrontlineLoadStatus.AuthRequired
+    val ultimateAuthenticationFailed = ultimateState.overviewStatus == PersonalDataUltimateLoadStatus.AuthRequired
+    val shareAuthenticationFailed = shareState == PersonalDataShareUiState.AuthenticationRequired
+    val authenticationFailed = shareAuthenticationFailed || authenticationRejected || readingAuthenticationFailed || rootAuthenticationFailed || dashboardAuthenticationFailed || frontlineAuthenticationFailed || ultimateAuthenticationFailed || explorationAuthenticationFailed
+    LaunchedEffect(readingAuthenticationFailed, rootAuthenticationFailed, dashboardAuthenticationFailed, frontlineAuthenticationFailed, ultimateAuthenticationFailed, explorationAuthenticationFailed, shareAuthenticationFailed) {
+        if (readingAuthenticationFailed || rootAuthenticationFailed || dashboardAuthenticationFailed || frontlineAuthenticationFailed || ultimateAuthenticationFailed || explorationAuthenticationFailed || shareAuthenticationFailed) {
+            authenticationRejected = true
+            if (!rootAuthenticationFailed) viewModel.clearProtectedContent()
+            if (!readingAuthenticationFailed) readingModel.clearProtectedContent()
+            dashboardModel.clearProtectedContent()
+            frontlineModel.clearProtectedContent()
+            ultimateModel.clearProtectedContent()
+            shareModel.clearProtectedContent()
+            ultimatePageGeneration++
+            PersonalDataDashboardSectionKind.entries.forEach { dashboardPages.removeState(it.name) }
+            PersonalDataFrontlineSection.entries.forEach { frontlinePages.removeState(it.name) }
+            explorationOwner.clearProtectedContent()
+            explorationBoard = null
+            screenStates.removeState("boards")
+            PersonalDataReadingPage.entries.forEach { screenStates.removeState("reading-${it.name}") }
+            hubScroll.scrollToItem(0)
+        }
+    }
+    val selectedReading = readingState.activePage
+    val typedBoard = state.selectedBoard?.takeIf { dashboardService != null && PersonalDataDashboardSectionKind.forBoard(it).isNotEmpty() }
+    val useFrontline = state.selectedBoard == PersonalDataBoard.Frontline && frontlineService != null
+    val useUltimate = state.selectedBoard == PersonalDataBoard.Ultimate && ultimateService != null
+    LaunchedEffect(typedBoard, selectedReading, explorationBoard, hasIdentity, authenticationFailed) {
+        if (typedBoard != null && selectedReading == null && explorationBoard == null && hasIdentity && !authenticationFailed) {
+            dashboardModel.open(typedBoard)
+        } else dashboardModel.close()
+    }
+    LaunchedEffect(useFrontline, selectedReading, explorationBoard, hasIdentity, authenticationFailed) {
+        if (useFrontline && selectedReading == null && explorationBoard == null && hasIdentity && !authenticationFailed) {
+            frontlineModel.open()
+        } else frontlineModel.close()
+    }
+    LaunchedEffect(useUltimate, selectedReading, explorationBoard, hasIdentity, authenticationFailed) {
+        if (useUltimate && selectedReading == null && explorationBoard == null && hasIdentity && !authenticationFailed) {
+            ultimateModel.open()
+        } else ultimateModel.close()
+    }
+    val onSelectBoard: (PersonalDataBoard) -> Unit = { board ->
+        val hasNativeReader = (frontlineService != null && board == PersonalDataBoard.Frontline) ||
+            (ultimateService != null && board == PersonalDataBoard.Ultimate) ||
+            (dashboardService != null && PersonalDataDashboardSectionKind.forBoard(board).isNotEmpty())
+        viewModel.selectBoard(board, loadContent = !hasNativeReader)
+    }
+    val openShare: (PersonalDataShareInput) -> Unit = { input ->
+        if (shareResources != null && shareRenderer != null) shareModel.open(input, shareResources, shareRenderer,
+            hasAccess = { service.hasCommunityIdentity }, clearExport = { shareHost?.clear() })
+    }
+    if (shareState != PersonalDataShareUiState.Closed && !authenticationFailed && hasIdentity) {
+        PersonalDataSharePreview(shareState, shareModel::close,
+            shareHost?.let { host -> { shareModel.share({ service.hasCommunityIdentity }, host::share) } }, modifier)
+        return
+    }
+    val boardShareInput = state.identity?.let { identity ->
+        when {
+            useFrontline -> PersonalDataShareInput.Frontline(identity, frontlineState)
+            useUltimate -> PersonalDataShareInput.Ultimate(identity, ultimateState)
+            typedBoard != null -> PersonalDataShareInput.Dashboard(when(typedBoard) {
+                PersonalDataBoard.Fishing -> PersonalDataShareKind.Fishing
+                PersonalDataBoard.Glamour -> PersonalDataShareKind.Glamour
+                else -> PersonalDataShareKind.Savage
+            }, identity, dashboardState)
+            else -> null
+        }
+    }
+    val dashboardContent: (@Composable (Modifier, Boolean) -> Unit)? = if (typedBoard != null && dashboardService != null) {
+        { paneModifier, showBack ->
+            RisingStonesPersonalDataDashboardPane(dashboardModel, viewModel::clearBoardSelection,
+                readingModel::open, paneModifier, showBack, dashboardService::itemIconUrl,
+                dashboardService::achievementIconUrl, dashboardService::raidImageUrl)
+        }
+    } else if (useFrontline) {
+        { paneModifier, showBack ->
+            RisingStonesPersonalDataFrontlinePane(frontlineModel, viewModel::clearBoardSelection, paneModifier,
+                showBack, frontlineService::frontlineJobIconUrl, frontlineService::frontlineCompanyFlagUrl,
+                frontlineService::frontlineAchievementImageUrl)
+        }
+    } else if (useUltimate) {
+        { paneModifier, showBack ->
+            RisingStonesPersonalDataUltimatePane(ultimateModel, viewModel::clearBoardSelection, paneModifier,
+                showBack, ultimateService::ultimateCoverUrl, ultimateService::ultimateJobIconUrl,
+                ultimateService::ultimateMedalImageUrl)
+        }
+    } else null
+    // Keep the reader's own empty authentication screen while the parent caches are revoked.
+    if (hasIdentity && selectedReading != null && service is PersonalDataReadingService && (!authenticationFailed || readingAuthenticationFailed)) {
+        screenStates.SaveableStateProvider("reading-${selectedReading.name}") {
+            RisingStonesPersonalDataReadingScreen(readingModel, readingModel::close, modifier, service::itemIconUrl)
+        }
+        return
+    }
+    val explorationService = service as? PersonalDataExplorationService
+    val onExplore: ((ExplorationBoard) -> Unit)? = explorationService?.let { { board -> explorationBoard = board } }
+    val selectedExploration = explorationBoard
+    if (hasIdentity && !authenticationFailed && selectedExploration != null && explorationService != null) {
+        val explorationModel = remember(explorationOwner, explorationService, selectedExploration) {
+            explorationOwner.model(explorationService, selectedExploration)
+        }
+        val onShareExploration: (() -> Unit)? = if (selectedExploration == ExplorationBoard.OccultCrescent && shareResources != null && state.identity != null) {
+            { openShare(PersonalDataShareInput.Occult(state.identity!!, explorationModel.state.value, explorationModel.phantomWeapons.value)) }
+        } else null
+        screenStates.SaveableStateProvider("exploration-${selectedExploration.name}") {
+            CompositionLocalProvider(LocalPersonalDataShareAction provides onShareExploration) {
+                RisingStonesExplorationScreen(explorationModel, onNavigateBack = { explorationBoard = null }, modifier)
+            }
+        }
+        return
+    }
+
+    screenStates.SaveableStateProvider("boards") {
+    CompositionLocalProvider(
+        LocalPersonalDataReadingOpen provides if (service is PersonalDataReadingService) readingModel::open else null,
+        LocalPersonalDataDashboardPages provides dashboardPages,
+        LocalPersonalDataFrontlinePages provides frontlinePages,
+        LocalPersonalDataUltimatePages provides ultimatePages,
+    ) {
     Scaffold(
         modifier = modifier,
         topBar = {
@@ -105,9 +317,22 @@ fun RisingStonesPersonalDataScreen(
                 },
                 title = { Text(stringResource(R.string.personal_data_title)) },
                 actions = {
+                    if (boardShareInput != null && shareResources != null && hasIdentity && !authenticationFailed) TextButton(
+                        onClick = { openShare(boardShareInput) }, modifier = Modifier.testTag("personal-data-share"),
+                    ) { Text(stringResource(R.string.pds_share)) }
                     TextButton(
-                        onClick = viewModel::refresh,
-                        enabled = viewModel.hasCommunityIdentity &&
+                        onClick = {
+                            if (typedBoard == null && !useFrontline && !useUltimate) viewModel.refresh() else {
+                                viewModel.loadRoot(force = true)
+                                when {
+                                    useFrontline -> frontlineModel.refresh()
+                                    useUltimate -> ultimateModel.refresh()
+                                    else -> dashboardModel.refresh()
+                                }
+                            }
+                        },
+                        modifier = Modifier.testTag("personal-data-refresh"),
+                        enabled = hasIdentity && !authenticationFailed &&
                             !state.isLoadingRoot &&
                             !state.isLoadingBoard &&
                             !state.isLoadingDetail,
@@ -118,7 +343,7 @@ fun RisingStonesPersonalDataScreen(
             )
         },
     ) { contentPadding ->
-        if (!viewModel.hasCommunityIdentity) {
+        if (!hasIdentity) {
             PersonalDataCenteredMessage(
                 text = stringResource(R.string.personal_data_identity_required),
                 modifier = Modifier
@@ -127,15 +352,20 @@ fun RisingStonesPersonalDataScreen(
             )
             return@Scaffold
         }
+        if (authenticationFailed) {
+            PersonalDataCenteredMessage(stringResource(R.string.personal_data_authentication_failed),
+                Modifier.fillMaxSize().padding(contentPadding).testTag("personal-data-auth"))
+            return@Scaffold
+        }
 
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(contentPadding),
         ) {
-            when (val layout = risingStonesPersonalDataLayoutMode(maxWidth.value.toInt())) {
+            when (val layout = personalDataLayoutFromPixels(constraints.maxWidth, LocalDensity.current.density)) {
                 RisingStonesPersonalDataLayoutMode.Compact -> {
-                    PersonalDataCompactContent(state, viewModel)
+                    PersonalDataCompactContent(state, viewModel, onExplore, boardScroll, hubScroll, onSelectBoard, dashboardContent)
                 }
 
                 RisingStonesPersonalDataLayoutMode.Medium,
@@ -144,8 +374,10 @@ fun RisingStonesPersonalDataScreen(
                     Row(Modifier.fillMaxSize()) {
                         PersonalDataHubPane(
                             state = state,
-                            onSelectBoard = viewModel::selectBoard,
+                            onSelectBoard = onSelectBoard,
                             onRetryRoot = { viewModel.loadRoot(force = true) },
+                            onExplore = onExplore,
+                            scroll = hubScroll,
                             modifier = Modifier
                                 .width(
                                     if (layout == RisingStonesPersonalDataLayoutMode.Expanded) {
@@ -172,6 +404,8 @@ fun RisingStonesPersonalDataScreen(
                                 state = state,
                                 viewModel = viewModel,
                                 showBoardBack = false,
+                                boardScroll = boardScroll,
+                                dashboardContent = dashboardContent,
                                 modifier = Modifier
                                     .fillMaxHeight()
                                     .widthIn(max = 1_120.dp),
@@ -182,12 +416,19 @@ fun RisingStonesPersonalDataScreen(
             }
         }
     }
+    }
+    }
 }
 
 @Composable
 private fun PersonalDataCompactContent(
     state: PersonalDataUiState,
     viewModel: PersonalDataViewModel,
+    onExplore: ((ExplorationBoard) -> Unit)?,
+    boardScroll: LazyListState,
+    hubScroll: LazyListState,
+    onSelectBoard: (PersonalDataBoard) -> Unit,
+    dashboardContent: (@Composable (Modifier, Boolean) -> Unit)?,
 ) {
     BackHandler(enabled = state.selectedBoard != null) {
         if (state.selectedEncounter != null) {
@@ -200,8 +441,10 @@ private fun PersonalDataCompactContent(
     if (state.selectedBoard == null) {
         PersonalDataHubPane(
             state = state,
-            onSelectBoard = viewModel::selectBoard,
+            onSelectBoard = onSelectBoard,
             onRetryRoot = { viewModel.loadRoot(force = true) },
+            onExplore = onExplore,
+            scroll = hubScroll,
             modifier = Modifier.fillMaxSize(),
         )
     } else {
@@ -209,6 +452,8 @@ private fun PersonalDataCompactContent(
             state = state,
             viewModel = viewModel,
             showBoardBack = true,
+            boardScroll = boardScroll,
+            dashboardContent = dashboardContent,
             modifier = Modifier.fillMaxSize(),
         )
     }
@@ -219,9 +464,12 @@ private fun PersonalDataHubPane(
     state: PersonalDataUiState,
     onSelectBoard: (PersonalDataBoard) -> Unit,
     onRetryRoot: () -> Unit,
+    scroll: LazyListState,
     modifier: Modifier,
+    onExplore: ((ExplorationBoard) -> Unit)? = null,
 ) {
     LazyColumn(
+        state = scroll,
         modifier = modifier.testTag("personal-data-hub-pane"),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -241,6 +489,11 @@ private fun PersonalDataHubPane(
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(top = 4.dp),
             )
+        }
+        if (onExplore != null) items(ExplorationBoard.entries, key = { "exploration-$it" }) { board ->
+            OutlinedButton(onClick = { onExplore(board) }, modifier = Modifier.fillMaxWidth().testTag("personal-data-exploration-$board")) {
+                Text(stringResource(board.label()))
+            }
         }
         items(PersonalDataBoard.entries, key = PersonalDataBoard::name) { board ->
             PersonalDataBoardCard(
@@ -308,7 +561,7 @@ private fun PersonalDataIdentityCard(
             }
             error?.let {
                 Text(
-                    text = it,
+                    text = personalDataFailureMessage(it),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )
@@ -417,6 +670,8 @@ private fun PersonalDataSelectedContent(
     state: PersonalDataUiState,
     viewModel: PersonalDataViewModel,
     showBoardBack: Boolean,
+    boardScroll: LazyListState,
+    dashboardContent: (@Composable (Modifier, Boolean) -> Unit)?,
     modifier: Modifier,
 ) {
     when {
@@ -424,6 +679,8 @@ private fun PersonalDataSelectedContent(
             text = stringResource(R.string.personal_data_select_board),
             modifier = modifier,
         )
+
+        dashboardContent != null -> dashboardContent(modifier, showBoardBack)
 
         state.selectedEncounter != null -> PersonalDataEncounterDetailPane(
             state = state,
@@ -436,6 +693,7 @@ private fun PersonalDataSelectedContent(
             state = state,
             onBack = viewModel::clearBoardSelection,
             showBack = showBoardBack,
+            scroll = boardScroll,
             onRetry = { viewModel.loadBoard(force = true) },
             onSelectEncounter = viewModel::selectEncounter,
             modifier = modifier,
@@ -448,12 +706,15 @@ private fun PersonalDataBoardPane(
     state: PersonalDataUiState,
     onBack: () -> Unit,
     showBack: Boolean,
+    scroll: LazyListState,
     onRetry: () -> Unit,
     onSelectEncounter: (UltimateEncounterSummary) -> Unit,
     modifier: Modifier,
 ) {
     val board = state.selectedBoard ?: return
+    val openReading = LocalPersonalDataReadingOpen.current
     LazyColumn(
+        state = scroll,
         modifier = modifier.testTag("personal-data-board-pane"),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -468,6 +729,19 @@ private fun PersonalDataBoardPane(
                 board = board,
                 hasData = state.availability?.hasData(board),
             )
+        }
+
+        if (openReading != null) {
+            val detailPages = when (board) {
+                PersonalDataBoard.Fishing -> listOf(PersonalDataReadingPage.Fish, PersonalDataReadingPage.Baits)
+                PersonalDataBoard.Glamour -> listOf(PersonalDataReadingPage.Sets, PersonalDataReadingPage.Races)
+                else -> emptyList()
+            }
+            items(detailPages, key = { "reading-${it.name}" }) { page ->
+                OutlinedButton({ openReading(page) }, Modifier.fillMaxWidth().testTag("personal-data-open-${page.name}")) {
+                    Text(stringResource(page.openLabel()))
+                }
+            }
         }
 
         if (state.isLoadingBoard && state.content == null && state.dashboard == null) {
@@ -718,7 +992,7 @@ private fun PersonalDataSectionCard(section: PersonalDataSection) {
             )
             section.error?.let {
                 Text(
-                    text = it,
+                    text = personalDataFailureMessage(it),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )
@@ -1083,7 +1357,7 @@ private fun PersonalDataDetailSection(
             )
             error?.let {
                 Text(
-                    text = it,
+                    text = personalDataFailureMessage(it),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )
@@ -1140,7 +1414,7 @@ private fun PersonalDataRecoverableMessage(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
-            text = message ?: stringResource(R.string.personal_data_unavailable),
+            text = message?.let { personalDataFailureMessage(it) } ?: stringResource(R.string.personal_data_unavailable),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.error,
         )
@@ -1164,7 +1438,7 @@ private fun PersonalDataInlineError(message: String, onRetry: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = message,
+                text = personalDataFailureMessage(message),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onErrorContainer,
                 modifier = Modifier.weight(1f),
@@ -1175,6 +1449,12 @@ private fun PersonalDataInlineError(message: String, onRetry: () -> Unit) {
         }
     }
 }
+
+@Composable
+private fun personalDataFailureMessage(error: String): String = stringResource(
+    if (error == "authentication_required") R.string.personal_data_authentication_failed
+    else R.string.personal_data_load_failed,
+)
 
 @Composable
 private fun PersonalDataLoading(text: String, modifier: Modifier) {

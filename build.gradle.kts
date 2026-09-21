@@ -168,6 +168,38 @@ abstract class VerifyReleaseManifestSecurityTask : DefaultTask() {
             "Release manifest must not be debuggable"
         }
 
+        val shareProviders = buildList {
+            val providers = document.getElementsByTagName("provider")
+            for (index in 0 until providers.length) {
+                val provider = providers.item(index) as Element
+                if (provider.androidAttribute("name") == "top.cxmeow.risingstones.app.PngShareFileProvider") {
+                    add(provider)
+                }
+            }
+        }
+        require(shareProviders.size == 1) {
+            "Release manifest must contain exactly one PNG share FileProvider"
+        }
+        val shareProvider = shareProviders.single()
+        val requiredShareProviderAttributes = mapOf(
+            "authorities" to "top.cxmeow.risingstones.share",
+            "exported" to "false",
+            "grantUriPermissions" to "true",
+        )
+        requiredShareProviderAttributes.forEach { (name, expected) ->
+            require(shareProvider.androidAttribute(name) == expected) {
+                "Release PNG share provider android:$name must be $expected"
+            }
+        }
+        val sharePathMetadata = shareProvider.getElementsByTagName("meta-data")
+        require((0 until sharePathMetadata.length).any { index ->
+            val metadata = sharePathMetadata.item(index) as Element
+            metadata.androidAttribute("name") == "android.support.FILE_PROVIDER_PATHS" &&
+                metadata.androidAttribute("resource") == "@xml/share_paths"
+        }) {
+            "Release PNG share provider must use the exact private share_paths resource"
+        }
+
         val exportedComponents = buildList {
             listOf("activity", "activity-alias", "service", "receiver", "provider").forEach { tag ->
                 val elements = document.getElementsByTagName(tag)

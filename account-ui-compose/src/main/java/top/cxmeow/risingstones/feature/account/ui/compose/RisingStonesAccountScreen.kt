@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -24,6 +25,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -51,8 +55,22 @@ fun RisingStonesAccountScreen(
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val onOpenGuild = LocalAccountGuildNavigation.current
+    var confirmDailySignIn by rememberSaveable(viewModel) { mutableStateOf(false) }
+    var confirmRewardId by rememberSaveable(viewModel) { mutableStateOf<Int?>(null) }
+    val canVerifyDailySignIn = viewModel.canVerifyDailySignIn
+    val confirmedReward = state.dashboard?.rewards?.firstOrNull {
+        it.id == confirmRewardId && it.status == RisingStonesRewardStatus.Claimable
+    }
+    val canVerifyConfirmedReward = confirmedReward?.let { viewModel.canVerifyClaimReward(it.id) } == true
     LaunchedEffect(viewModel) {
         viewModel.load()
+    }
+    LaunchedEffect(viewModel, canVerifyDailySignIn) {
+        if (!canVerifyDailySignIn) confirmDailySignIn = false
+    }
+    LaunchedEffect(viewModel, confirmRewardId, canVerifyConfirmedReward) {
+        if (confirmRewardId != null && !canVerifyConfirmedReward) confirmRewardId = null
     }
 
     Scaffold(
@@ -147,14 +165,20 @@ fun RisingStonesAccountScreen(
                                         ),
                                         style = MaterialTheme.typography.bodyLarge,
                                     )
-                                    if (canDailySignIn) {
+                                    val hasVerifiedDailySignIn = viewModel.hasVerifiedDailySignIn
+                                    if (canDailySignIn || canVerifyDailySignIn || hasVerifiedDailySignIn) {
                                         Spacer(Modifier.height(4.dp))
                                         Button(
-                                            onClick = viewModel::signIn,
-                                            enabled = !state.isSigningIn,
+                                            onClick = {
+                                                if (canDailySignIn) viewModel.signIn()
+                                                else confirmDailySignIn = true
+                                            },
+                                            enabled = !state.isSigningIn && !hasVerifiedDailySignIn,
                                         ) {
                                             if (state.isSigningIn) {
                                                 CircularProgressIndicator()
+                                            } else if (hasVerifiedDailySignIn) {
+                                                Text(stringResource(R.string.rising_stones_account_signed_in))
                                             } else {
                                                 Text(
                                                     stringResource(
@@ -164,6 +188,14 @@ fun RisingStonesAccountScreen(
                                             }
                                         }
                                     }
+                                }
+                            }
+                        }
+                        onOpenGuild?.let { openGuild ->
+                            item {
+                                Card(onClick = openGuild, modifier = Modifier.fillMaxWidth()) {
+                                    Text(stringResource(R.string.rising_stones_account_my_guild),
+                                        Modifier.padding(20.dp), style = MaterialTheme.typography.titleMedium)
                                 }
                             }
                         }
@@ -200,9 +232,13 @@ fun RisingStonesAccountScreen(
                             items(rewards, key = RisingStonesReward::id) { reward ->
                                 RewardCard(
                                     reward = reward,
-                                    canClaim = canDailySignIn,
+                                    canClaim = canDailySignIn || viewModel.canVerifyClaimReward(reward.id),
                                     isClaiming = reward.id in state.claimingRewardIds,
-                                    onClaim = { viewModel.claimReward(reward.id) },
+                                    wasVerified = viewModel.hasVerifiedClaimReward(reward.id),
+                                    onClaim = {
+                                        if (canDailySignIn) viewModel.claimReward(reward.id)
+                                        else confirmRewardId = reward.id
+                                    },
                                 )
                             }
                         }
@@ -211,6 +247,35 @@ fun RisingStonesAccountScreen(
             }
         }
     }
+    if (confirmDailySignIn && canVerifyDailySignIn) {
+        AccountActionConfirmationDialog(
+            title = stringResource(R.string.rising_stones_account_sign_in),
+            description = stringResource(R.string.rising_stones_account_confirm_daily_sign_in),
+            confirmLabel = stringResource(R.string.rising_stones_account_confirm_sign_in),
+            onConfirm = {
+                confirmDailySignIn = false
+                if (viewModel.canVerifyDailySignIn) viewModel.verifyDailySignIn()
+            },
+            onDismiss = { confirmDailySignIn = false },
+        )
+    }
+    confirmedReward?.takeIf { canVerifyConfirmedReward }?.let { reward ->
+        AccountActionConfirmationDialog(
+            title = stringResource(R.string.rising_stones_account_claim),
+            description = stringResource(
+                R.string.rising_stones_account_confirm_claim_reward,
+                reward.itemName?.takeIf(String::isNotBlank) ?: reward.description,
+            ),
+            confirmLabel = stringResource(R.string.rising_stones_account_claim),
+            onConfirm = {
+                confirmRewardId = null
+                if (viewModel.canVerifyClaimReward(reward.id)) {
+                    viewModel.verifyClaimReward(reward.id)
+                }
+            },
+            onDismiss = { confirmRewardId = null },
+        )
+    }
 }
 
 @Composable
@@ -218,6 +283,7 @@ private fun RewardCard(
     reward: RisingStonesReward,
     canClaim: Boolean,
     isClaiming: Boolean,
+    wasVerified: Boolean,
     onClaim: () -> Unit,
 ) {
     Card(Modifier.fillMaxWidth()) {
@@ -244,9 +310,12 @@ private fun RewardCard(
                 }
             }
             when (reward.status) {
-                RisingStonesRewardStatus.Claimable -> if (canClaim) {
+                RisingStonesRewardStatus.Claimable -> if (wasVerified) {
+                    Text(stringResource(R.string.rising_stones_account_received))
+                } else if (canClaim) {
                     Button(onClick = onClaim, enabled = !isClaiming) {
-                        Text(stringResource(R.string.rising_stones_account_claim))
+                        if (isClaiming) CircularProgressIndicator()
+                        else Text(stringResource(R.string.rising_stones_account_claim))
                     }
                 } else {
                     Text(stringResource(R.string.rising_stones_account_not_qualified))
@@ -260,4 +329,27 @@ private fun RewardCard(
             }
         }
     }
+}
+
+@Composable
+private fun AccountActionConfirmationDialog(
+    title: String,
+    description: String,
+    confirmLabel: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Text(description) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text(confirmLabel) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.rising_stones_account_cancel))
+            }
+        },
+    )
 }

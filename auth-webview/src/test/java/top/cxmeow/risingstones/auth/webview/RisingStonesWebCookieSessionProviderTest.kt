@@ -21,6 +21,45 @@ import top.cxmeow.risingstones.network.RisingStonesSessionValidator
 
 class RisingStonesWebCookieSessionProviderTest {
     @Test
+    fun alternateAcceptedSessionRestoresAndRefreshesWithoutGrantingCapabilities() = runTest {
+        val saved = credential("fixture-alt")
+        val store = FakeCookieStore(credential = saved)
+        val jar = FakeWebCookieJar()
+        val provider = RisingStonesWebCookieSessionProvider(store,
+            RisingStonesSessionValidator { RisingStonesSessionValidation(null, 10002) }, jar)
+
+        provider.restore()
+        assertTrue(provider.sessionState.value is RisingStonesSessionState.Active)
+        assertTrue(provider.capabilities.isEmpty())
+        assertTrue(provider.refreshAuthorizer() != null)
+        assertEquals(setOf("ff14risingstones=fixture-alt"), provider.currentCookieHeaders())
+        assertSame(saved, store.credential)
+        assertEquals(0, store.clearCount)
+        assertEquals(0, jar.clearCount)
+    }
+
+    @Test
+    fun acceptedCodeFromLegacyValidatorDoesNotEraseTheCredentialOnRefresh() = runTest {
+        var fail = false
+        val store = FakeCookieStore()
+        val jar = FakeWebCookieJar()
+        val provider = RisingStonesWebCookieSessionProvider(store, RisingStonesSessionValidator {
+            if (fail) throw RisingStonesApiException("未登录", code = 10002)
+            RisingStonesSessionValidation(null, 10000, setOf(RisingStonesCapability.AccountRead))
+        }, jar)
+        provider.accept(credential("current"))
+        val active = provider.sessionState.value
+
+        fail = true
+        assertNull(provider.refreshAuthorizer())
+
+        assertSame(active, provider.sessionState.value)
+        assertEquals(setOf("ff14risingstones=current"), provider.currentCookieHeaders())
+        assertEquals(0, store.clearCount)
+        assertEquals(0, jar.clearCount)
+    }
+
+    @Test
     fun validatedCandidateBecomesActiveAndIsPersisted() = runTest {
         val store = FakeCookieStore()
         val provider = RisingStonesWebCookieSessionProvider(
@@ -60,6 +99,118 @@ class RisingStonesWebCookieSessionProviderTest {
     }
 
     @Test
+    fun refreshReplacesCapabilitiesWithoutRewritingCredential() = runTest {
+        var capabilities = setOf(RisingStonesCapability.AccountRead, RisingStonesCapability.DynamicRead)
+        val store = FakeCookieStore()
+        val provider = RisingStonesWebCookieSessionProvider(
+            store = store,
+            sessionValidator = RisingStonesSessionValidator {
+                RisingStonesSessionValidation(null, 10000, capabilities)
+            },
+        )
+        val candidate = credential("current")
+        assertTrue(provider.accept(candidate).isSuccess)
+        capabilities = setOf(RisingStonesCapability.AccountRead)
+
+        assertTrue(provider.refreshAuthorizer() != null)
+
+        assertEquals(capabilities, provider.capabilities)
+        assertSame(candidate, store.credential)
+        assertEquals(1, store.writeCount)
+    }
+
+    @Test
+    fun rejectedRefreshRevokesMemoryAndClearsStoredAndWebCredentials() = runTest {
+        var rejected = false
+        val store = FakeCookieStore()
+        val webCookieJar = FakeWebCookieJar()
+        val provider = RisingStonesWebCookieSessionProvider(
+            store = store,
+            webCookieJar = webCookieJar,
+            sessionValidator = RisingStonesSessionValidator { authorizer ->
+                if (rejected) throw RisingStonesApiException("private server message", code = 10001)
+                successfulValidator().validateSession(authorizer)
+            },
+        )
+        assertTrue(provider.accept(credential("current")).isSuccess)
+        rejected = true
+
+        assertNull(provider.refreshAuthorizer())
+
+        assertNull(provider.currentAuthorizer())
+        assertTrue(provider.capabilities.isEmpty())
+        assertNull(store.credential)
+        assertEquals(1, store.clearCount)
+        assertEquals(1, webCookieJar.clearCount)
+        assertEquals(
+            "Rising Stones session expired",
+            (provider.sessionState.value as RisingStonesSessionState.Invalid).reason,
+        )
+    }
+
+    @Test
+    fun transientRefreshFailureKeepsSessionForRetry() = runTest {
+        var fail = false
+        val store = FakeCookieStore()
+        val webCookieJar = FakeWebCookieJar()
+        val provider = RisingStonesWebCookieSessionProvider(
+            store = store,
+            webCookieJar = webCookieJar,
+            sessionValidator = RisingStonesSessionValidator { authorizer ->
+                if (fail) throw java.io.IOException("network unavailable")
+                successfulValidator().validateSession(authorizer)
+            },
+        )
+        assertTrue(provider.accept(credential("current")).isSuccess)
+        val previousState = provider.sessionState.value
+        fail = true
+
+        assertNull(provider.refreshAuthorizer())
+
+        assertSame(previousState, provider.sessionState.value)
+        assertTrue(provider.currentAuthorizer() != null)
+        assertEquals(0, store.clearCount)
+        assertEquals(0, webCookieJar.clearCount)
+    }
+
+    @Test
+    fun cancelledRefreshPropagatesAndPreservesSession() = runTest {
+        var cancel = false
+        val provider = RisingStonesWebCookieSessionProvider(
+            store = FakeCookieStore(),
+            sessionValidator = RisingStonesSessionValidator { authorizer ->
+                if (cancel) throw CancellationException("cancel refresh")
+                successfulValidator().validateSession(authorizer)
+            },
+        )
+        assertTrue(provider.accept(credential("current")).isSuccess)
+        val previousState = provider.sessionState.value
+        cancel = true
+        var cancellation: CancellationException? = null
+
+        try {
+            provider.refreshAuthorizer()
+        } catch (error: CancellationException) {
+            cancellation = error
+        }
+
+        assertEquals("cancel refresh", cancellation?.message)
+        assertSame(previousState, provider.sessionState.value)
+        assertTrue(provider.currentAuthorizer() != null)
+    }
+
+    @Test
+    fun signedOutRefreshDoesNotSendARequest() = runTest {
+        val provider = RisingStonesWebCookieSessionProvider(
+            store = FakeCookieStore(),
+            sessionValidator = RisingStonesSessionValidator { error("must not be called") },
+        )
+
+        assertNull(provider.refreshAuthorizer())
+        assertSame(RisingStonesSessionState.SignedOut, provider.sessionState.value)
+    }
+
+    @Test
     fun rejectedStoredCredentialIsClearedWithoutEscapingRestore() = runTest {
         val store = FakeCookieStore(credential = credential("expired"))
         val webCookieJar = FakeWebCookieJar()
@@ -67,7 +218,7 @@ class RisingStonesWebCookieSessionProviderTest {
             store = store,
             webCookieJar = webCookieJar,
             sessionValidator = RisingStonesSessionValidator {
-                error("session expired")
+                throw RisingStonesApiException("session expired", code = 10403)
             },
         )
 
@@ -78,6 +229,55 @@ class RisingStonesWebCookieSessionProviderTest {
         assertEquals(1, store.clearCount)
         assertEquals(1, webCookieJar.clearCount)
         assertTrue(provider.currentCookieHeaders().isEmpty())
+    }
+
+    @Test
+    fun temporaryRestoreFailureKeepsEncryptedAndWebCredentialsWithoutAuthorizingRequests() = runTest {
+        val failures = listOf(
+            java.io.IOException("fixture transport failure"),
+            RisingStonesApiException("fixture service unavailable", code = 503),
+            RisingStonesApiException("fixture response could not be decoded"),
+        )
+        for (failure in failures) {
+            val stored = credential("retained")
+            val store = FakeCookieStore(credential = stored)
+            val jar = FakeWebCookieJar()
+            val provider = RisingStonesWebCookieSessionProvider(store,
+                RisingStonesSessionValidator { throw failure }, jar)
+
+            provider.restore()
+
+            assertTrue(provider.sessionState.value is RisingStonesSessionState.Invalid)
+            assertNull(provider.currentAuthorizer())
+            assertTrue(provider.capabilities.isEmpty())
+            assertSame(stored, store.credential)
+            assertEquals(0, store.clearCount)
+            assertEquals(0, jar.clearCount)
+        }
+    }
+
+    @Test
+    fun explicitRestoreRetryCanValidateTheRetainedCredentialAfterNetworkRecovery() = runTest {
+        val stored = credential("retry")
+        val store = FakeCookieStore(credential = stored)
+        val jar = FakeWebCookieJar()
+        var unavailable = true
+        val provider = RisingStonesWebCookieSessionProvider(store, RisingStonesSessionValidator {
+            if (unavailable) throw java.io.IOException("fixture transport failure")
+            RisingStonesSessionValidation(null, 10000, setOf(RisingStonesCapability.AccountRead))
+        }, jar)
+        provider.restore()
+        assertNull(provider.currentAuthorizer())
+
+        unavailable = false
+        provider.restore()
+
+        assertTrue(provider.sessionState.value is RisingStonesSessionState.Active)
+        assertTrue(provider.currentAuthorizer() != null)
+        assertEquals(setOf(RisingStonesCapability.AccountRead), provider.capabilities)
+        assertSame(stored, store.credential)
+        assertEquals(0, store.clearCount)
+        assertEquals(0, jar.clearCount)
     }
 
     @Test
@@ -269,6 +469,7 @@ private class FakeCookieStore(
     private val clearFailure: Exception? = null,
 ) : RisingStonesCookieStore {
     var clearCount: Int = 0
+    var writeCount: Int = 0
 
     override suspend fun read(): RisingStonesCookieCredential? {
         readFailure?.let { throw it }
@@ -276,6 +477,7 @@ private class FakeCookieStore(
     }
 
     override suspend fun write(credential: RisingStonesCookieCredential) {
+        writeCount += 1
         this.credential = credential
     }
 

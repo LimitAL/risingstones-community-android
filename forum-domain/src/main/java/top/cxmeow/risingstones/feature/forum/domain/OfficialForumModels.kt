@@ -144,7 +144,7 @@ data class OfficialForumPostVote(
     val totalUserCount: Int,
     val options: List<OfficialForumPostVoteOption>,
 ) {
-    val allowsMultipleSelection: Boolean get() = type != 1 || (maximumSelectionCount ?: 1) > 1
+    val allowsMultipleSelection: Boolean get() = options.firstOrNull()?.type == 2
     val hasParticipated: Boolean get() = options.any(OfficialForumPostVoteOption::isParticipant)
 }
 

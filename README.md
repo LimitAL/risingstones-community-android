@@ -16,8 +16,12 @@
 - `ui-compose`：可选的默认 Compose 登录界面。
 - `account-*`：官方账号摘要、签到记录、奖励和每日签到能力。
 - `forum-*`：官方论坛列表、搜索、详情、评论、帖子链接和资源解析。
+- `profile-*`：个人资料、隐私过滤、发布与收藏历史、关注和粉丝列表。
+- `message-*`：未读摘要、系统、提及、评论、点赞、招募消息及已回应记录。
+- `dynamic-*`：经过当前会话验证的关注动态流、动态详情、评论与楼中楼读取。
 - `recruitment-*`：副本、新人、部队、其他及跑团招募能力。
-- `glamour-*`：官方投影台列表、详情和收藏能力。
+- `guild-*`：我的部队资料、成员、成员动态、相册、照片详情、评论及楼中楼阅读。
+- `glamour-*`：官方投影台社区与关注流、条件及物品筛选、本人和作者作品、收藏夹管理与优惠券领取。
 - `personal-data-*`：官方个人数据中心及可选展示目录契约。
 - `app`：可独立安装、编译和运行的客户端。
 
@@ -39,7 +43,7 @@ cd risingstones-community-android
 
 ## 构建要求
 
-工程要求 JDK 21 和 Android SDK 36：
+Gradle 守护进程要求 JDK 25，Java/Kotlin 编译目标为 JVM 17，Android SDK 为 36：
 
 ```bash
 ./gradlew testDebugUnitTest lintDebug assembleDebug
@@ -50,9 +54,13 @@ cd risingstones-community-android
 ```bash
 ANDROID_SERIAL=<模拟器序列号> ./gradlew :auth-webview:connectedDebugAndroidTest
 ANDROID_SERIAL=<模拟器序列号> ./gradlew :forum-ui-compose:connectedDebugAndroidTest
+ANDROID_SERIAL=<模拟器序列号> ./gradlew :dynamic-ui-compose:connectedDebugAndroidTest
+ANDROID_SERIAL=<模拟器序列号> ./gradlew :message-ui-compose:connectedDebugAndroidTest
+ANDROID_SERIAL=<模拟器序列号> ./gradlew :profile-ui-compose:connectedDebugAndroidTest
 ANDROID_SERIAL=<模拟器序列号> ./gradlew :glamour-ui-compose:connectedDebugAndroidTest
 ANDROID_SERIAL=<模拟器序列号> ./gradlew :personal-data-ui-compose:connectedDebugAndroidTest
 ANDROID_SERIAL=<模拟器序列号> ./gradlew :recruitment-ui-compose:connectedDebugAndroidTest
+ANDROID_SERIAL=<模拟器序列号> ./gradlew :guild-ui-compose:connectedDebugAndroidTest
 ```
 
 持续集成会执行单元测试、Lint、Debug APK 组装、分层边界、安全边界、三语资源一致性、
@@ -71,8 +79,17 @@ Maven 发布和独立消费验证。新增官方资源主机或论坛外链转�
 
 ## 当前能力状态
 
-独立客户端已经具备 Cookie 登录、官方论坛、官方账号、招募、投影台和个人数据中心的
+独立客户端已经具备 Cookie 登录、官方论坛、官方账号、动态、消息、招募、投影台和个人数据中心的
 domain、data、presentation、默认 Compose 界面与自适应导航。
+
+个人数据中心通过可选扩展接口支持蜃景与朝圣交错路，包括职业进度、道具、成就和按需历史。
+钓鱼、零式、投影、前线、绝境和蜃景支持本地生成分享图片、原生预览与系统分享；不会上传图片
+或为分享新增业务请求。
+投影台支持装备、眼镜与配饰候选搜索、收藏到指定收藏夹、收藏夹管理和优惠券领取；
+搜索读取已有当前 Android 会话证据，新增写入流程以公开源码、合成服务和设备测试验证，
+尚未操作真实账号。
+具体页面与尚待补齐的能力见[官方移动站移植记录](docs/web-parity-plan.md)。
+完整功能闭环与后续实施顺序见[剩余功能清单](docs/remaining-functional-scope.md)。
 
 匿名论坛与招募读取链路已经在当前官方线上环境验证。需要身份的账号摘要、签到、论坛写入、
 投影台和个人数据等能力，必须由当前 WebView 会话逐项完成无副作用探测或人工验证后才会显示
@@ -86,6 +103,7 @@ domain、data、presentation、默认 Compose 界面与自适应导航。
 迁移。官方登录 WebView 显示期间会启用 `FLAG_SECURE`，离开页面后恢复原有窗口状态。
 
 各接口当前验证情况见[兼容性矩阵](docs/compatibility-matrix.md)。
+移动站路由、接口证据及移植缺口见[原生移植记录](docs/web-parity-plan.md)。
 
 ## 发布
 

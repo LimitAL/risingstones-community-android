@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="dynamic_title">动态</string>
+    <string name="dynamic_back">返回</string>
+    <string name="dynamic_refresh">刷新</string>
+    <string name="dynamic_select">选择一条动态查看详情</string>
+    <string name="dynamic_sign_in">会话已过期，请重新登录。</string>
+    <string name="dynamic_unavailable">当前会话无法访问动态。</string>
+    <string name="dynamic_empty">暂无动态，关注社区成员后可查看更新。</string>
+    <string name="dynamic_more">加载更多</string>
+    <string name="dynamic_source">查看来源</string>
+    <string name="dynamic_comments">评论</string>
+    <string name="dynamic_no_comments">暂无评论</string>
+    <string name="dynamic_replies">查看 %1$d 条回复</string>
+    <string name="dynamic_counts">%1$d 条评论 · %2$d 赞</string>
+    <string name="dynamic_reply_to">回复 %1$s</string>
+    <string name="dynamic_image">打开图片</string>
+    <string name="dynamic_close">关闭</string>
+    <string name="dynamic_retry">重试</string>
+    <string name="dynamic_refresh_failed">刷新失败，仍可阅读原有内容。</string>
+    <string name="dynamic_failed">无法加载动态。</string>
+    <string name="dynamic_origin_post">转发帖子</string>
+    <string name="dynamic_origin_guide">转发攻略</string>
+    <string name="dynamic_origin_glamour">转发幻化</string>
+    <string name="dynamic_origin_recruitment">转发招募</string>
+    <string name="dynamic_unknown_author">社区成员</string>
+    <string name="dynamic_open_author_profile">查看 %1$s 的社区主页</string>
+</resources>

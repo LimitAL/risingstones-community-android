@@ -54,7 +54,7 @@ data class GlamourAuthorProfile(
     val followerCount: Int,
     val relation: Int,
 ) {
-    val isFollowing: Boolean get() = relation == 2
+    val isFollowing: Boolean get() = relation in 2..3
 }
 data class GlamourRace(val id: Int, val name: String)
 

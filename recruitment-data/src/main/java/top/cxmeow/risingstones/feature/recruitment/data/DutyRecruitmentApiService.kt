@@ -19,6 +19,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
+import top.cxmeow.risingstones.core.auth.RisingStonesExplicitCapabilityProvider
 import top.cxmeow.risingstones.core.auth.RisingStonesAuthenticationRequirement
 import top.cxmeow.risingstones.core.auth.RisingStonesCapability
 import top.cxmeow.risingstones.core.auth.RisingStonesHeaderSink
@@ -26,6 +27,12 @@ import top.cxmeow.risingstones.core.auth.RisingStonesIdentityConflictResolver
 import top.cxmeow.risingstones.core.auth.RisingStonesRequestAuthorizer
 import top.cxmeow.risingstones.core.auth.RisingStonesRequestContext
 import top.cxmeow.risingstones.core.auth.RisingStonesSessionProvider
+import top.cxmeow.risingstones.feature.recruitment.domain.RecruitmentAuthorService
+import top.cxmeow.risingstones.feature.recruitment.domain.RecruitmentActionEligibilityService
+import top.cxmeow.risingstones.feature.recruitment.domain.CommunityRecruitmentAuthorPage
+import top.cxmeow.risingstones.feature.recruitment.domain.CommunityRecruitmentAuthorDetail
+import top.cxmeow.risingstones.feature.recruitment.domain.RolePlayReviewAuthorPage
+import top.cxmeow.risingstones.feature.recruitment.domain.RolePlaySubcommentAuthorPage
 import top.cxmeow.risingstones.feature.recruitment.domain.BeginnerRecruitmentCard
 import top.cxmeow.risingstones.feature.recruitment.domain.BeginnerRecruitmentIdentity
 import top.cxmeow.risingstones.feature.recruitment.domain.BeginnerRecruitmentStyle
@@ -37,29 +44,42 @@ import top.cxmeow.risingstones.feature.recruitment.domain.CommunityRecruitmentFi
 import top.cxmeow.risingstones.feature.recruitment.domain.CommunityRecruitmentFilterOption
 import top.cxmeow.risingstones.feature.recruitment.domain.CommunityRecruitmentInformation
 import top.cxmeow.risingstones.feature.recruitment.domain.CommunityRecruitmentInformationKind
+import top.cxmeow.risingstones.feature.recruitment.domain.CommunityRecruitmentInteractionDetail
 import top.cxmeow.risingstones.feature.recruitment.domain.CommunityRecruitmentKind
 import top.cxmeow.risingstones.feature.recruitment.domain.CommunityRecruitmentPage
 import top.cxmeow.risingstones.feature.recruitment.domain.CommunityRecruitmentQuery
 import top.cxmeow.risingstones.feature.recruitment.domain.CommunityRecruitmentServer
 import top.cxmeow.risingstones.feature.recruitment.domain.CommunityRecruitmentSummary
 import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentCatalogs
+import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentBrowseQuery
+import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentFilterCatalog
 import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentDetail
 import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentDutyConfig
 import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentException
 import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentJob
+import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentInteractionDetail
 import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentLabel
 import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentListPage
 import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentListQuery
 import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentRoleCounts
-import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentService
+import top.cxmeow.risingstones.feature.recruitment.domain.RecruitmentBrowsingService
+import top.cxmeow.risingstones.feature.recruitment.domain.RecruitmentResponseEligibilityService
 import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentSummary
 import top.cxmeow.risingstones.feature.recruitment.domain.GuildRecruitmentCard
 import top.cxmeow.risingstones.feature.recruitment.domain.OtherRecruitmentCard
 import top.cxmeow.risingstones.feature.recruitment.domain.RolePlayRecruitmentCard
 import top.cxmeow.risingstones.feature.recruitment.domain.RolePlayRecruitmentMember
+import top.cxmeow.risingstones.feature.recruitment.domain.RolePlayActivity
+import top.cxmeow.risingstones.feature.recruitment.domain.RolePlayActivityDetail
+import top.cxmeow.risingstones.feature.recruitment.domain.RolePlayDirectoryService
+import top.cxmeow.risingstones.feature.recruitment.domain.RolePlayMemberDetail
+import top.cxmeow.risingstones.feature.recruitment.domain.RolePlayMemberPage
+import top.cxmeow.risingstones.feature.recruitment.domain.RolePlayMemberQuery
 import top.cxmeow.risingstones.feature.recruitment.domain.RolePlayRecruitmentRating
 import top.cxmeow.risingstones.feature.recruitment.domain.RolePlayRecruitmentReview
 import top.cxmeow.risingstones.feature.recruitment.domain.RolePlayRecruitmentReviewPage
+import top.cxmeow.risingstones.feature.recruitment.domain.RolePlayRecruitmentReviewOrder
+import top.cxmeow.risingstones.feature.recruitment.domain.RolePlayRecruitmentReviewQuery
 import top.cxmeow.risingstones.feature.recruitment.domain.RolePlayRecruitmentSubcomment
 import top.cxmeow.risingstones.feature.recruitment.domain.RolePlayRecruitmentSubcommentPage
 import top.cxmeow.risingstones.feature.recruitment.domain.RolePlayRecruitmentType
@@ -68,35 +88,66 @@ import top.cxmeow.risingstones.network.RisingStonesApiRequest
 import top.cxmeow.risingstones.network.RisingStonesHttpException
 import top.cxmeow.risingstones.network.RisingStonesHttpMethod
 import top.cxmeow.risingstones.network.RisingStonesPublicApiClient
+import top.cxmeow.risingstones.network.RisingStonesResponsePolicy
 
 class DutyRecruitmentApiService(
     private val client: RisingStonesPublicApiClient,
     private val sessionProvider: RisingStonesSessionProvider,
     private val json: Json = Json { ignoreUnknownKeys = true; explicitNulls = false },
     private val temporarySessionId: String = UUID.randomUUID().toString(),
-) : DutyRecruitmentService {
+) : RecruitmentBrowsingService, RecruitmentResponseEligibilityService, RecruitmentActionEligibilityService,
+    RolePlayDirectoryService, RecruitmentAuthorService {
+    private val rolePlayDirectory = RolePlayDirectoryApiReader(temporarySessionId) { perform(it) }
+
+    override val canPerformAuthenticatedWrites: Boolean
+        get() = RisingStonesCapability.RecruitmentWrite in sessionProvider.capabilities
+
+    override val canAttemptAuthenticatedWrites: Boolean
+        get() = (sessionProvider as? RisingStonesExplicitCapabilityProvider)
+            ?.canAttemptCapability(RisingStonesCapability.RecruitmentWrite) == true
+
     override val hasCommunityIdentity: Boolean
         get() = sessionProvider.capabilities.any {
             it == RisingStonesCapability.RecruitmentAuthenticated ||
                 it == RisingStonesCapability.RecruitmentWrite
         }
 
-    override suspend fun fetchDutyRecruitments(query: DutyRecruitmentListQuery): DutyRecruitmentListPage {
-        val parameters = mutableListOf(q("page", query.page.coerceAtLeast(1)), q("limit", query.limit.coerceAtLeast(1)))
-        query.dutyName.takeIf(String::isNotBlank)?.let { parameters += q("fb_name", it) }
-        query.dutyType.takeIf(String::isNotBlank)?.let { parameters += q("fb_type", it) }
-        query.position?.let { parameters += q("position", it.wireValue) }
+    override suspend fun fetchDutyRecruitments(query: DutyRecruitmentListQuery): DutyRecruitmentListPage =
+        fetchDutyRecruitments(DutyRecruitmentBrowseQuery(query))
+
+    override suspend fun fetchDutyRecruitments(query: DutyRecruitmentBrowseQuery): DutyRecruitmentListPage {
+        val list = query.list
+        val parameters = mutableListOf(q("page", list.page.coerceAtLeast(1)), q("limit", list.limit.coerceAtLeast(1)))
+        list.dutyName.takeIf(String::isNotBlank)?.let { parameters += q("fb_name", it) }
+        list.dutyType.takeIf(String::isNotBlank)?.let { parameters += q("fb_type", it) }
+        val positions = query.positions.distinct().joinToString(",") { it.wireValue }
+        if (positions.isNotEmpty()) parameters += q("position", positions)
+        query.teamComposition.takeIf { it.isNotBlank() && it != "全部队伍" }?.let { parameters += q("team_composition", it) }
+        query.targetAreaId.takeIf { it.isNotBlank() && it != "0" }?.let { parameters += q("target_area_id", it) }
+        query.labelIds.distinct().takeIf(List<String>::isNotEmpty)?.let { parameters += q("label", it.joinToString(",")) }
+        if (query.teamComposition == "团队") {
+            query.allianceTeamKey.takeIf(String::isNotBlank)?.let { parameters += q("son_team_key", it) }
+            if (positions.isNotEmpty()) parameters += q("son_team_position", positions)
+        }
         val payload = perform(
             RisingStonesApiRequest("api/home/recruit/recruitFbList", query = parameters),
         ).obj("data") ?: throw DutyRecruitmentException.MissingPayload
-        val items = payload.array("rows").mapNotNull(::dutySummary)
-        return DutyRecruitmentListPage(items, payload.int("count") ?: items.size, query.page.coerceAtLeast(1))
+        val items = payload.requiredArray("rows").mapNotNull(::dutySummary)
+        return DutyRecruitmentListPage(items, payload.int("count") ?: items.size, list.page.coerceAtLeast(1))
     }
 
-    override suspend fun fetchDutyRecruitmentDetail(id: Int): DutyRecruitmentDetail {
-        val row = perform(
-            RisingStonesApiRequest("api/home/recruit/getRecruitFbDetail", query = listOf(q("id", id))),
-        ).obj("data") ?: throw DutyRecruitmentException.MissingPayload
+    override suspend fun fetchDutyRecruitmentDetail(id: Int): DutyRecruitmentDetail = dutyDetail(fetchDutyRow(id))
+
+    override suspend fun fetchDutyInteractionDetail(id: Int): DutyRecruitmentInteractionDetail {
+        val row = fetchDutyRow(id)
+        return DutyRecruitmentInteractionDetail(dutyDetail(row), isCurrentUserAuthor(row.string("uuid")))
+    }
+
+    private suspend fun fetchDutyRow(id: Int): JsonObject = perform(
+        RisingStonesApiRequest("api/home/recruit/getRecruitFbDetail", query = listOf(q("id", id))),
+    ).obj("data") ?: throw DutyRecruitmentException.MissingPayload
+
+    private fun dutyDetail(row: JsonObject): DutyRecruitmentDetail {
         val summary = dutySummary(row) ?: throw DutyRecruitmentException.MissingPayload
         return DutyRecruitmentDetail(
             summary = summary,
@@ -123,9 +174,10 @@ class DutyRecruitmentApiService(
 
     override suspend fun fetchCatalogs(): DutyRecruitmentCatalogs {
         val jobData = perform(RisingStonesApiRequest("api/home/recruit/getJobConfigList")).obj("data")
-        val jobs = jobData?.values.orEmpty().flatMap { (it as? JsonArray).orEmpty() }
+            ?: throw DutyRecruitmentException.MissingPayload
+        val jobs = jobData.values.flatMap { it as? JsonArray ?: throw DutyRecruitmentException.MissingPayload }
             .mapNotNull { (it as? JsonObject)?.job() }.associateBy(DutyRecruitmentJob::id)
-        val duties = perform(RisingStonesApiRequest("api/home/recruit/getFbConfigList")).array("data")
+        val duties = perform(RisingStonesApiRequest("api/home/recruit/getFbConfigList")).requiredArray("data")
             .mapNotNull { value ->
                 val item = value as? JsonObject ?: return@mapNotNull null
                 DutyRecruitmentDutyConfig(
@@ -139,10 +191,28 @@ class DutyRecruitmentApiService(
         return DutyRecruitmentCatalogs(jobs, duties)
     }
 
-    override suspend fun fetchCommunityRecruitments(query: CommunityRecruitmentQuery): CommunityRecruitmentPage {
+    override suspend fun fetchDutyFilterCatalog(): DutyRecruitmentFilterCatalog {
+        val catalogs = fetchCatalogs()
+        val labels = perform(RisingStonesApiRequest("api/home/recruit/fbLabelList"))
+            .requiredArray("data").mapNotNull { value ->
+                val item = value as? JsonObject ?: return@mapNotNull null
+                DutyRecruitmentLabel(
+                    item.text("id") ?: return@mapNotNull null,
+                    item.text("name") ?: return@mapNotNull null,
+                    item.int("weight") ?: 0,
+                )
+            }
+        return DutyRecruitmentFilterCatalog(catalogs, labels, fetchAreas())
+    }
+
+    override suspend fun fetchCommunityRecruitments(query: CommunityRecruitmentQuery): CommunityRecruitmentPage =
+        fetchCommunityRecruitmentsWithAuthors(query).page
+
+    override suspend fun fetchCommunityRecruitmentsWithAuthors(query: CommunityRecruitmentQuery): CommunityRecruitmentAuthorPage {
         val parameters = mutableListOf(q("page", query.page.coerceAtLeast(1)), q("limit", query.limit.coerceAtLeast(1)))
         fun add(name: String, value: String) { value.trim().takeIf(String::isNotEmpty)?.let { parameters += q(name, it) } }
         fun csv(name: String, values: List<String>) = add(name, values.joinToString(","))
+        val selectedArea = query.areaId.trim().takeIf { it.isNotEmpty() && it != "0" }
         when (query.kind) {
             CommunityRecruitmentKind.Beginner -> {
                 csv("style", query.styleIds); add("identity", query.identity)
@@ -153,30 +223,61 @@ class DutyRecruitmentApiService(
                 csv("label", query.guildLabelIds); add("target_area_id", query.areaId); add("target_group_id", query.groupId)
             }
             CommunityRecruitmentKind.Other -> {
-                csv("category", query.categoryIds); add("target_area_id", query.areaId); add("target_group_id", query.groupId)
+                csv("category", query.categoryIds)
+                selectedArea?.let {
+                    add("target_area_id", it)
+                    add("target_group_id", query.groupId)
+                }
             }
             CommunityRecruitmentKind.RolePlay -> {
                 add("rp_name", query.keyword); csv("rp_type", query.rolePlayTypes)
                 add("act_status", query.rolePlayStatus); add("order", query.order)
-                add("rp_area_id", query.areaId); add("rp_group_id", query.groupId)
+                selectedArea?.let {
+                    add("rp_area_id", it)
+                    if (query.groupId.split(',').none { group -> group.trim() == "0" }) {
+                        add("rp_group_id", query.groupId)
+                    }
+                }
             }
         }
         val payload = perform(
             RisingStonesApiRequest(query.kind.listEndpoint, query = parameters),
             required = query.kind.requiresAuthentication,
         ).obj("data") ?: throw DutyRecruitmentException.MissingPayload
-        val items = payload.array("rows").mapNotNull { (it as? JsonObject)?.communitySummary(query.kind) }
-        return CommunityRecruitmentPage(items, payload.int("count") ?: items.size, query.page.coerceAtLeast(1))
+        val rows = payload.requiredArray("rows")
+        val items = rows.mapNotNull { (it as? JsonObject)?.communitySummary(query.kind) }
+        return CommunityRecruitmentAuthorPage(
+            CommunityRecruitmentPage(items, payload.int("count") ?: items.size, query.page.coerceAtLeast(1)),
+            // The mobile list card does not establish a community author identity.
+            // Only the separately verified detail payload exposes this navigation target.
+            emptyMap(),
+        )
     }
 
     override suspend fun fetchCommunityRecruitmentDetail(
         id: Int,
         kind: CommunityRecruitmentKind,
-    ): CommunityRecruitmentDetail {
-        val row = perform(
-            RisingStonesApiRequest(kind.detailEndpoint, query = listOf(q("id", id), q("tempsuid", temporarySessionId))),
-            required = kind.requiresAuthentication,
-        ).obj("data") ?: throw DutyRecruitmentException.MissingPayload
+    ): CommunityRecruitmentDetail = communityDetail(fetchCommunityRow(id, kind), kind)
+
+    override suspend fun fetchCommunityInteractionDetail(
+        id: Int,
+        kind: CommunityRecruitmentKind,
+    ): CommunityRecruitmentInteractionDetail = fetchCommunityDetailWithAuthor(id, kind).interaction
+
+    override suspend fun fetchCommunityDetailWithAuthor(id: Int, kind: CommunityRecruitmentKind): CommunityRecruitmentAuthorDetail {
+        val row = fetchCommunityRow(id, kind)
+        return CommunityRecruitmentAuthorDetail(
+            CommunityRecruitmentInteractionDetail(communityDetail(row, kind), isCurrentUserAuthor(row.string("uuid"))),
+            row.communityAuthorUuid(),
+        )
+    }
+
+    private suspend fun fetchCommunityRow(id: Int, kind: CommunityRecruitmentKind): JsonObject = perform(
+        RisingStonesApiRequest(kind.detailEndpoint, query = listOf(q("id", id), q("tempsuid", temporarySessionId))),
+        required = kind.requiresAuthentication,
+    ).obj("data") ?: throw DutyRecruitmentException.MissingPayload
+
+    private fun communityDetail(row: JsonObject, kind: CommunityRecruitmentKind): CommunityRecruitmentDetail {
         val summary = row.communityDetailSummary(kind) ?: throw DutyRecruitmentException.MissingPayload
         val information = mutableListOf<CommunityRecruitmentInformation>()
         fun info(type: CommunityRecruitmentInformationKind, vararg keys: String) {
@@ -217,6 +318,33 @@ class DutyRecruitmentApiService(
         return CommunityRecruitmentDetail(summary, information, content)
     }
 
+    private suspend fun isCurrentUserAuthor(authorUuid: String?): Boolean? {
+        if ((!canPerformAuthenticatedWrites && !canAttemptAuthenticatedWrites) || authorUuid.isNullOrBlank()) return null
+        val readCapability = when {
+            RisingStonesCapability.AccountRead in sessionProvider.capabilities -> RisingStonesCapability.AccountRead
+            canPerformAuthenticatedWrites -> RisingStonesCapability.RecruitmentWrite
+            else -> return null
+        }
+        return try {
+            val identity = perform(
+                RisingStonesApiRequest("api/home/groupAndRole/getCharacterBindInfo", query = listOf(q("platform", 1))),
+                required = true,
+                readCapability = readCapability,
+            ).obj("data") ?: return null
+            if ((!canPerformAuthenticatedWrites && !canAttemptAuthenticatedWrites) ||
+                identity.string("character_name").isNullOrBlank()
+            ) return null
+            val currentUuid = identity.string("uuid")?.takeIf(String::isNotBlank) ?: return null
+            currentUuid == authorUuid
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: DutyRecruitmentException.AuthenticationRequired) {
+            throw error
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     override suspend fun fetchCommunityFilterCatalog(kind: CommunityRecruitmentKind): CommunityRecruitmentFilterCatalog {
         val areas = fetchAreas()
         return when (kind) {
@@ -233,38 +361,38 @@ class DutyRecruitmentApiService(
         }
     }
 
-    override suspend fun fetchRolePlayMembers(id: Int): List<RolePlayRecruitmentMember> {
-        val data = perform(
-            RisingStonesApiRequest(
-                "api/home/recruit/getRecruitRpMemberListByRpId",
-                query = listOf(q("id", id), q("page", 1), q("limit", 10), q("tempsuid", temporarySessionId)),
-            ),
-        ).obj("data") ?: throw DutyRecruitmentException.MissingPayload
-        return data.array("rows").mapNotNull { value ->
-            val item = value as? JsonObject ?: return@mapNotNull null
-            RolePlayRecruitmentMember(
-                id = item.int("id") ?: return@mapNotNull null,
-                name = item.text("member_name") ?: return@mapNotNull null,
-                identity = item.text("member_identity"),
-                avatarUrl = item.text("avatar_pic"),
-                description = item.text("detail_mask")?.plainText(),
-                detailImageUrls = item.text("detail_pic").imageUrls(),
-            )
-        }
-    }
+    override suspend fun fetchRolePlayMembers(id: Int): List<RolePlayRecruitmentMember> =
+        fetchRolePlayMemberPage(RolePlayMemberQuery(id)).items
 
-    override suspend fun fetchRolePlayReviews(id: Int, page: Int, limit: Int): RolePlayRecruitmentReviewPage {
-        val normalizedLimit = limit.coerceAtLeast(1)
+    override suspend fun fetchRolePlayMemberPage(query: RolePlayMemberQuery): RolePlayMemberPage =
+        rolePlayDirectory.members(query)
+
+    override suspend fun fetchRolePlayMemberDetail(id: Int): RolePlayMemberDetail = rolePlayDirectory.member(id)
+
+    override suspend fun fetchRolePlayActivities(recruitmentId: Int): List<RolePlayActivity> =
+        rolePlayDirectory.activities(recruitmentId)
+
+    override suspend fun fetchRolePlayActivityDetail(id: Int): RolePlayActivityDetail = rolePlayDirectory.activity(id)
+
+    override suspend fun fetchRolePlayReviews(id: Int, page: Int, limit: Int): RolePlayRecruitmentReviewPage =
+        fetchRolePlayReviews(RolePlayRecruitmentReviewQuery(id, page, limit, RolePlayRecruitmentReviewOrder.Hottest))
+
+    override suspend fun fetchRolePlayReviews(query: RolePlayRecruitmentReviewQuery): RolePlayRecruitmentReviewPage =
+        fetchRolePlayReviewsWithAuthors(query).page
+
+    override suspend fun fetchRolePlayReviewsWithAuthors(query: RolePlayRecruitmentReviewQuery): RolePlayReviewAuthorPage {
+        val normalizedLimit = query.limit.coerceAtLeast(1)
         val data = perform(
             RisingStonesApiRequest(
                 "api/home/recruit/recruitRpCommentDetail",
                 query = listOf(
-                    q("id", id), q("order", "hottest"), q("page", page.coerceAtLeast(1)),
+                    q("id", query.recruitmentId), q("order", query.order.wireValue), q("page", query.page.coerceAtLeast(1)),
                     q("limit", normalizedLimit), q("tempsuid", temporarySessionId),
                 ),
             ),
         ).obj("data") ?: throw DutyRecruitmentException.MissingPayload
-        val items = data.array("rows").mapNotNull { value ->
+        val rows = data.requiredArray("rows")
+        val items = rows.mapNotNull { value ->
             val row = value as? JsonObject ?: return@mapNotNull null
             val contentHtml = row.text("mask_content") ?: return@mapNotNull null
             RolePlayRecruitmentReview(
@@ -282,14 +410,25 @@ class DutyRecruitmentApiService(
                 contentHtml = contentHtml,
             )
         }
-        return RolePlayRecruitmentReviewPage(items, page.coerceAtLeast(1), items.size >= normalizedLimit)
+        return RolePlayReviewAuthorPage(
+            RolePlayRecruitmentReviewPage(items, query.page.coerceAtLeast(1), rows.size >= normalizedLimit),
+            authorIndex(rows, items.map { it.id }) { row ->
+                row.text("id")?.takeIf { row.text("character_name") != null && row.text("mask_content") != null }
+            },
+        )
     }
 
     override suspend fun fetchRolePlaySubcomments(
         rootParentId: String,
         page: Int,
         limit: Int,
-    ): RolePlayRecruitmentSubcommentPage {
+    ): RolePlayRecruitmentSubcommentPage = fetchRolePlaySubcommentsWithAuthors(rootParentId, page, limit).page
+
+    override suspend fun fetchRolePlaySubcommentsWithAuthors(
+        rootParentId: String,
+        page: Int,
+        limit: Int,
+    ): RolePlaySubcommentAuthorPage {
         val normalizedLimit = limit.coerceAtLeast(1)
         val data = perform(
             RisingStonesApiRequest(
@@ -300,7 +439,8 @@ class DutyRecruitmentApiService(
                 ),
             ),
         ).obj("data") ?: throw DutyRecruitmentException.MissingPayload
-        val items = data.array("rows").mapNotNull { value ->
+        val rows = data.requiredArray("rows")
+        val items = rows.mapNotNull { value ->
             val row = value as? JsonObject ?: return@mapNotNull null
             val contentHtml = row.text("mask_content") ?: return@mapNotNull null
             RolePlayRecruitmentSubcomment(
@@ -313,7 +453,12 @@ class DutyRecruitmentApiService(
                 contentHtml = contentHtml,
             )
         }
-        return RolePlayRecruitmentSubcommentPage(items, page.coerceAtLeast(1), items.size >= normalizedLimit)
+        return RolePlaySubcommentAuthorPage(
+            RolePlayRecruitmentSubcommentPage(items, page.coerceAtLeast(1), rows.size >= normalizedLimit),
+            authorIndex(rows, items.map { it.id }) { row ->
+                row.text("id")?.takeIf { row.text("character_name") != null && row.text("mask_content") != null }
+            },
+        )
     }
 
     override suspend fun fetchRolePlayRating(id: Int): RolePlayRecruitmentRating {
@@ -322,23 +467,27 @@ class DutyRecruitmentApiService(
                 "api/home/recruit/getRecruitRpScoreListByRpId",
                 query = listOf(q("id", id), q("tempsuid", temporarySessionId)),
             ),
-        ).array("data").take(5).map { (it as? JsonPrimitive)?.flexInt() ?: 0 }.toMutableList()
+        ).requiredArray("data").take(5).map { (it as? JsonPrimitive)?.flexInt() ?: 0 }.toMutableList()
         while (values.size < 5) values += 0
         return RolePlayRecruitmentRating(values)
     }
 
-    override suspend fun likeRolePlayReview(id: String): Int = form(
-        "api/home/recruit/rpCommentlike", listOf("id" to id), required = true,
-    ).int("data") ?: throw DutyRecruitmentException.MissingPayload
+    override suspend fun likeRolePlayReview(id: String): Int = writeForm(
+        "api/home/recruit/rpCommentlike", listOf("id" to id, "type" to "2"),
+    ) { envelope ->
+        envelope.int("data")?.takeIf { it == -1 || it == 1 }
+            ?: throw DutyRecruitmentException.MissingPayload
+    }
 
-    private suspend fun response(path: String, id: Int, contactInfo: String): String? = form(
-        path,
-        listOf("id" to id.toString(), "contact_info" to contactInfo),
-        required = true,
-    ).obj("data")?.text("recruit_contact_info", "recruitContactInfo")
+    private suspend fun response(path: String, id: Int, contactInfo: String): String? = writeForm(
+        path, listOf("id" to id.toString(), "contact_info" to contactInfo),
+    ) { envelope ->
+        val data = envelope.obj("data") ?: throw DutyRecruitmentException.MissingPayload
+        data.string("recruit_contact_info", "recruitContactInfo")?.takeIf(String::isNotBlank)
+    }
 
     private suspend fun fetchOptions(path: String, nameKey: String): List<CommunityRecruitmentFilterOption> =
-        perform(RisingStonesApiRequest(path)).array("data").mapNotNull { value ->
+        perform(RisingStonesApiRequest(path)).requiredArray("data").mapNotNull { value ->
             val item = value as? JsonObject ?: return@mapNotNull null
             CommunityRecruitmentFilterOption(
                 item.text("id") ?: return@mapNotNull null,
@@ -348,12 +497,12 @@ class DutyRecruitmentApiService(
 
     private suspend fun fetchAreas(): List<CommunityRecruitmentArea> = perform(
         RisingStonesApiRequest("api/home/groupAndRole/getAreaAndGroupList"),
-    ).array("data").mapNotNull { value ->
+    ).requiredArray("data").mapNotNull { value ->
         val item = value as? JsonObject ?: return@mapNotNull null
         CommunityRecruitmentArea(
             id = item.text("AreaID", "area_id", "areaId") ?: return@mapNotNull null,
             name = item.text("AreaName", "area_name", "areaName") ?: return@mapNotNull null,
-            servers = item.array("vGroup", "groups").mapNotNull { groupValue ->
+            servers = item.requiredArray("vGroup", "groups").mapNotNull { groupValue ->
                 val group = groupValue as? JsonObject ?: return@mapNotNull null
                 CommunityRecruitmentServer(
                     group.text("GroupID", "group_id", "groupId") ?: return@mapNotNull null,
@@ -363,34 +512,104 @@ class DutyRecruitmentApiService(
         )
     }
 
-    private suspend fun form(
+    private suspend fun <T> writeForm(
         path: String,
         fields: List<Pair<String, String>>,
-        required: Boolean,
-    ): JsonObject {
+        map: (JsonObject) -> T,
+    ): T {
         val all = fields + ("tempsuid" to temporarySessionId)
-        return perform(
-            RisingStonesApiRequest(
-                path = path,
-                method = RisingStonesHttpMethod.Post,
-                query = listOf(q("tempsuid", temporarySessionId)),
-                body = all.joinToString("&") { (key, value) -> "${key.encoded()}=${value.encoded()}" }.encodeToByteArray(),
-                contentType = "application/x-www-form-urlencoded; charset=utf-8",
-            ),
-            required,
-            mutation = true,
+        val request = RisingStonesApiRequest(
+            path = path,
+            method = RisingStonesHttpMethod.Post,
+            query = listOf(q("tempsuid", temporarySessionId)),
+            body = all.joinToString("&") { (key, value) -> "${key.encoded()}=${value.encoded()}" }.encodeToByteArray(),
+            contentType = "application/x-www-form-urlencoded; charset=utf-8",
         )
+        val explicit = sessionProvider as? RisingStonesExplicitCapabilityProvider
+        if (explicit == null) return map(perform(request, required = true, mutation = true))
+
+        val context = RisingStonesRequestContext(
+            path = path,
+            requirement = RisingStonesAuthenticationRequirement.Required,
+            capability = RisingStonesCapability.RecruitmentWrite,
+        )
+        val attempt = explicit.beginCapabilityAttempt(context)
+            ?: throw DutyRecruitmentException.AuthenticationRequired
+        try {
+            val headers = attempt.authorizer.headers(
+                path,
+                RisingStonesCapability.RecruitmentWrite,
+                RisingStonesAuthenticationRequirement.Required,
+            )
+            val response = client.execute(request.copy(headers = request.headers + headers))
+            if (response.statusCode !in 200..299) {
+                throw RisingStonesHttpException.ServerResponse(response.statusCode, response.body)
+            }
+            val envelope = try {
+                json.parseToJsonElement(response.body.decodeToString()).jsonObject
+            } catch (_: IllegalArgumentException) {
+                throw DutyRecruitmentException.MissingPayload
+            }
+            val code = envelope.int("code") ?: 0
+            if (envelope.isAuthenticationFailure()) {
+                revalidateWithoutReplay()
+                throw DutyRecruitmentException.AuthenticationRequired
+            }
+            if (!RisingStonesResponsePolicy.accepts(code)) {
+                throw DutyRecruitmentException.Business(code, envelope.text("msg", "message"))
+            }
+            val result = map(envelope)
+            if (!attempt.complete()) throw DutyRecruitmentException.AuthenticationRequired
+            return result
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            if (!error.isHttpIdentityConflict() && error.isHttpAuthenticationFailure()) {
+                revalidateWithoutReplay()
+                throw DutyRecruitmentException.AuthenticationRequired
+            }
+            throw error
+        } finally {
+            attempt.close()
+        }
+    }
+
+    private suspend fun revalidateWithoutReplay() {
+        try {
+            sessionProvider.refreshAuthorizer()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            // This read-only refresh is best effort; the rejected write remains the reported result.
+        }
     }
 
     private suspend fun perform(
         request: RisingStonesApiRequest,
         required: Boolean = false,
         mutation: Boolean = false,
+        readCapability: RisingStonesCapability? = null,
+    ): JsonObject = try {
+        performWithAuthentication(request, required, mutation, readCapability)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        if (!error.isHttpIdentityConflict() && error.isHttpAuthenticationFailure()) {
+            throw DutyRecruitmentException.AuthenticationRequired
+        }
+        throw error
+    }
+
+    private suspend fun performWithAuthentication(
+        request: RisingStonesApiRequest,
+        required: Boolean,
+        mutation: Boolean,
+        readCapability: RisingStonesCapability?,
     ): JsonObject {
-        val capability = if (mutation) {
+        val capability = if (mutation || (!required && canPerformAuthenticatedWrites)) {
             RisingStonesCapability.RecruitmentWrite
         } else {
-            RisingStonesCapability.RecruitmentAuthenticated
+            readCapability ?: RisingStonesCapability.RecruitmentAuthenticated
         }
         val initial = if (capability in sessionProvider.capabilities) {
             sessionProvider.currentAuthorizer()
@@ -409,35 +628,63 @@ class DutyRecruitmentApiService(
                 },
             ).orEmpty()
             val response = client.execute(request.copy(headers = request.headers + headers))
+            if (response.statusCode !in 200..299) {
+                throw RisingStonesHttpException.ServerResponse(response.statusCode, response.body)
+            }
             return json.parseToJsonElement(response.body.decodeToString()).jsonObject
         }
+        if (mutation) {
+            val response = try {
+                execute(initial)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                if (initial != null && !error.isHttpIdentityConflict() && error.isHttpAuthenticationFailure()) {
+                    revalidateWithoutReplay()
+                }
+                throw error
+            }
+            val code = response.int("code") ?: 0
+            if (response.isAuthenticationFailure()) {
+                revalidateWithoutReplay()
+                throw DutyRecruitmentException.AuthenticationRequired
+            }
+            if (!RisingStonesResponsePolicy.accepts(code)) {
+                throw DutyRecruitmentException.Business(code, response.text("msg", "message"))
+            }
+            return response
+        }
+        var recoveryAttempted = false
         var response = try {
             execute(initial)
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
             when {
-                error.isHttpIdentityConflict() -> execute(
-                    (sessionProvider as? RisingStonesIdentityConflictResolver)
-                        ?.awaitIdentityConflictResolution() ?: throw error,
-                )
-                initial != null && error.isHttpAuthenticationFailure() -> execute(
-                    sessionProvider.refreshAuthorizer() ?: throw error,
-                )
+                error.isHttpIdentityConflict() -> {
+                    recoveryAttempted = true
+                    execute((sessionProvider as? RisingStonesIdentityConflictResolver)
+                        ?.awaitIdentityConflictResolution() ?: throw error)
+                }
+                initial != null && error.isHttpAuthenticationFailure() -> {
+                    recoveryAttempted = true
+                    execute(sessionProvider.refreshAuthorizer() ?: throw error)
+                }
                 else -> throw error
             }
         }
-        if (response.int("code") == 10105) {
+        if (!recoveryAttempted && response.int("code") == 10105) {
             response = execute(
                 (sessionProvider as? RisingStonesIdentityConflictResolver)
                     ?.awaitIdentityConflictResolution()
                     ?: throw DutyRecruitmentException.Business(10105, response.text("msg")),
             )
-        } else if (initial != null && response.isAuthenticationFailure()) {
+        } else if (!recoveryAttempted && initial != null && response.isAuthenticationFailure()) {
             sessionProvider.refreshAuthorizer()?.let { response = execute(it) }
         }
         val code = response.int("code") ?: 0
-        if (code != 10000) throw DutyRecruitmentException.Business(code, response.text("msg", "message"))
+        if (response.isAuthenticationFailure()) throw DutyRecruitmentException.AuthenticationRequired
+        if (!RisingStonesResponsePolicy.accepts(code)) throw DutyRecruitmentException.Business(code, response.text("msg", "message"))
         return response
     }
 
@@ -621,10 +868,14 @@ private fun q(name: String, value: Any?) = RisingStonesApiQueryItem(name, value?
 private fun JsonObject.element(vararg names: String): JsonElement? =
     names.firstNotNullOfOrNull { this[it]?.takeUnless { value -> value is JsonNull } }
 private fun JsonObject.text(vararg names: String): String? = (element(*names) as? JsonPrimitive)?.contentOrNull
+private fun JsonObject.string(vararg names: String): String? =
+    (element(*names) as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
 private fun JsonObject.int(vararg names: String): Int? = (element(*names) as? JsonPrimitive)?.flexInt()
 private fun JsonPrimitive.flexInt(): Int? = intOrNull ?: contentOrNull?.toIntOrNull() ?: doubleOrNull?.toInt()
 private fun JsonObject.obj(vararg names: String): JsonObject? = element(*names) as? JsonObject
 private fun JsonObject.array(vararg names: String): List<JsonElement> = (element(*names) as? JsonArray).orEmpty()
+private fun JsonObject.requiredArray(vararg names: String): List<JsonElement> =
+    element(*names) as? JsonArray ?: throw DutyRecruitmentException.MissingPayload
 private fun JsonObject.stringArray(vararg names: String): List<String> = array(*names).mapNotNull {
     (it as? JsonPrimitive)?.contentOrNull
 }
@@ -654,8 +905,8 @@ private fun String.encoded() = URLEncoder.encode(this, StandardCharsets.UTF_8.na
 
 private fun JsonObject.isAuthenticationFailure(): Boolean {
     val code = int("code")
-    if (code == 10105) return false
-    if (code in setOf(401, 403, 10002, 10003, 10004, 10005, 10403)) return true
+    if (RisingStonesResponsePolicy.accepts(code) || code == 10105) return false
+    if (code in setOf(401, 403, 10003, 10004, 10005, 10403)) return true
     val message = text("msg", "message").orEmpty().lowercase()
     return listOf("未登录", "登录失效", "登录过期", "token失效", "unauthorized", "session expired")
         .any(message::contains)
@@ -676,3 +927,18 @@ private val HtmlImageRegex = Regex(
 )
 private const val DefaultOtherRecruitmentCover =
     "https://static.web.sdo.com/jijiamobile/pic/ff14/ffstones/default_recruit_cover.jpg"
+
+private fun JsonObject.communityAuthorUuid(): String? =
+    (this["uuid"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull?.trim()?.takeIf(String::isNotEmpty)
+
+private fun <K> authorIndex(rows: List<JsonElement>, validIds: List<K>, id: (JsonObject) -> K?): Map<K, String> {
+    val valid = validIds.toSet()
+    val seen = hashSetOf<K>()
+    return buildMap {
+        rows.forEach { value ->
+            val row = value as? JsonObject ?: return@forEach
+            val key = id(row)?.takeIf { it in valid } ?: return@forEach
+            if (seen.add(key)) row.communityAuthorUuid()?.let { put(key, it) }
+        }
+    }
+}

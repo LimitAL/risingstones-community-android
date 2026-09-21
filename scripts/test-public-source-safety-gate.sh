@@ -66,6 +66,11 @@ printf '%s\n' \
   > "$fixture_root/app/src/main/java/example/Fixture.kt"
 expect_failure "unreviewed hard-coded host" "outside the reviewed public allowlist"
 
+for lookalike_host in 'https://ff14-eo.web.sdo.com.evil.example/image.png' 'https://ff14-eo.web.sdo.com@evil.example/image.png' 'http://ff14-eo.web.sdo.com/image.png'; do
+  printf '%s\n' "internal const val UnreviewedIcon = \"$lookalike_host\"" > "$fixture_root/app/src/main/java/example/Fixture.kt"
+  expect_failure "unreviewed icon host variant" "outside the reviewed public allowlist"
+done
+
 write_safe_source
 touch "$fixture_root/release.jks"
 expect_failure "signing artifact" "local, signing, credential, or built artifact"

@@ -4,6 +4,9 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -22,6 +25,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -39,6 +44,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -49,6 +55,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,6 +67,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -67,10 +76,14 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumAuthor
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumComment
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumCommentOrder
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumFeedFilter
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumSearchOrder
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumContentKind
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumLinkParser
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumPostBodyBlock
@@ -83,6 +96,9 @@ import top.cxmeow.risingstones.feature.forum.domain.OfficialForumService
 import top.cxmeow.risingstones.feature.forum.presentation.OfficialForumDetailUiState
 import top.cxmeow.risingstones.feature.forum.presentation.OfficialForumDetailViewModel
 import top.cxmeow.risingstones.feature.forum.presentation.OfficialForumDetailViewModelFactory
+import top.cxmeow.risingstones.feature.forum.presentation.OfficialForumDetailInteractionState
+import top.cxmeow.risingstones.feature.forum.presentation.OfficialForumInteractionError
+import top.cxmeow.risingstones.feature.forum.presentation.OfficialForumReplyTarget
 import top.cxmeow.risingstones.feature.forum.presentation.OfficialForumListUiState
 import top.cxmeow.risingstones.feature.forum.presentation.OfficialForumListViewModel
 import top.cxmeow.risingstones.feature.forum.presentation.OfficialForumListViewModelFactory
@@ -101,11 +117,30 @@ fun RisingStonesForumScreen(
     onOpenPersonalData: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    RisingStonesForumScreen(service, onOpenAccount, onOpenRecruitment, onOpenGlamour,
+        onOpenPersonalData, modifier, onOpenDynamic = null)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RisingStonesForumScreen(
+    service: OfficialForumService,
+    onOpenAccount: () -> Unit,
+    onOpenRecruitment: (() -> Unit)? = null,
+    onOpenGlamour: (() -> Unit)? = null,
+    onOpenPersonalData: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+    onOpenDynamic: (() -> Unit)?,
+    onOpenMessages: (() -> Unit)? = null,
+    onOpenProfile: (() -> Unit)? = null,
+) {
     val listViewModel: OfficialForumListViewModel = viewModel(
-        key = "rising-stones-forum-list",
+        key = "rising-stones-forum-list-${System.identityHashCode(service)}",
         factory = remember(service) { OfficialForumListViewModelFactory(service) },
     )
     val state by listViewModel.state.collectAsStateWithLifecycle()
+    val listScrollState = rememberLazyListState()
+    val detailScrollState = key(state.selectedPostId) { rememberLazyListState() }
     var isServicesMenuExpanded by remember { mutableStateOf(false) }
     LaunchedEffect(listViewModel) {
         listViewModel.ensureLoaded()
@@ -118,6 +153,9 @@ fun RisingStonesForumScreen(
                 title = { Text(stringResource(R.string.forum_title)) },
                 actions = {
                     if (
+                        onOpenDynamic != null ||
+                        onOpenMessages != null ||
+                        onOpenProfile != null ||
                         onOpenGlamour != null ||
                         onOpenRecruitment != null ||
                         onOpenPersonalData != null
@@ -130,6 +168,18 @@ fun RisingStonesForumScreen(
                                 expanded = isServicesMenuExpanded,
                                 onDismissRequest = { isServicesMenuExpanded = false },
                             ) {
+                                onOpenProfile?.let { openProfile ->
+                                    DropdownMenuItem(text = { Text(stringResource(R.string.forum_profile)) },
+                                        onClick = { isServicesMenuExpanded = false; openProfile() })
+                                }
+                                onOpenMessages?.let { openMessages ->
+                                    DropdownMenuItem(text = { Text(stringResource(R.string.forum_messages)) },
+                                        onClick = { isServicesMenuExpanded = false; openMessages() })
+                                }
+                                onOpenDynamic?.let { openDynamic ->
+                                    DropdownMenuItem(text = { Text(stringResource(R.string.forum_dynamic)) },
+                                        onClick = { isServicesMenuExpanded = false; openDynamic() })
+                                }
                                 onOpenRecruitment?.let { openRecruitment ->
                                     DropdownMenuItem(
                                         text = { Text(stringResource(R.string.forum_recruitment)) },
@@ -185,12 +235,14 @@ fun RisingStonesForumScreen(
                         ForumListPane(
                             state = state,
                             viewModel = listViewModel,
+                            scrollState = listScrollState,
                             modifier = Modifier.fillMaxSize(),
                         )
                     } else {
                         ForumDetailPane(
                             service = service,
                             postId = selectedPostId,
+                            scrollState = detailScrollState,
                             showBack = true,
                             onBack = listViewModel::clearSelection,
                             onOpenPost = listViewModel::selectPostId,
@@ -206,6 +258,7 @@ fun RisingStonesForumScreen(
                         ForumListPane(
                             state = state,
                             viewModel = listViewModel,
+                            scrollState = listScrollState,
                             modifier = Modifier
                                 .width(
                                     if (layoutMode == RisingStonesForumLayoutMode.Expanded) {
@@ -236,6 +289,7 @@ fun RisingStonesForumScreen(
                                 ForumDetailPane(
                                     service = service,
                                     postId = selectedPostId,
+                                    scrollState = detailScrollState,
                                     showBack = false,
                                     onBack = listViewModel::clearSelection,
                                     onOpenPost = listViewModel::selectPostId,
@@ -256,8 +310,10 @@ fun RisingStonesForumScreen(
 private fun ForumListPane(
     state: OfficialForumListUiState,
     viewModel: OfficialForumListViewModel,
+    scrollState: LazyListState,
     modifier: Modifier,
 ) {
+    val browsing by viewModel.browsingState.collectAsStateWithLifecycle()
     Column(modifier) {
         Column(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -297,22 +353,89 @@ private fun ForumListPane(
                     }
                 },
             )
-            if (
-                state.contentKind == OfficialForumContentKind.Post &&
-                state.parts.isNotEmpty()
-            ) {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(state.parts, key = { it.id }) { part ->
+            if (state.loadedSearchText.isNotEmpty()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OfficialForumSearchOrder.entries.forEach { order ->
                         FilterChip(
-                            selected = part.id in state.selectedPartIds,
-                            onClick = { viewModel.togglePart(part.id) },
-                            label = { Text(part.name, maxLines = 1) },
+                            selected = state.searchOrder == order,
+                            onClick = { viewModel.setSearchOrder(order) },
+                            label = { Text(stringResource(if (order == OfficialForumSearchOrder.Time)
+                                R.string.forum_search_time else R.string.forum_search_comments)) },
                         )
                     }
+                }
+            } else if (browsing.available) {
+                val filters = if (state.contentKind == OfficialForumContentKind.Post) {
+                    listOf(OfficialForumFeedFilter.Default, OfficialForumFeedFilter.Latest,
+                        OfficialForumFeedFilter.Refined)
+                } else {
+                    listOf(OfficialForumFeedFilter.Default, OfficialForumFeedFilter.Pinned,
+                        OfficialForumFeedFilter.Refined)
+                }
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(filters) { filter ->
+                        val label = when (filter) {
+                            OfficialForumFeedFilter.Default -> if (state.contentKind == OfficialForumContentKind.Post)
+                                R.string.forum_latest_reply else R.string.forum_all
+                            OfficialForumFeedFilter.Latest -> R.string.forum_latest_publish
+                            OfficialForumFeedFilter.Refined -> R.string.forum_refined
+                            OfficialForumFeedFilter.Pinned -> R.string.forum_pinned
+                        }
+                        FilterChip(selected = browsing.filter == filter,
+                            onClick = { viewModel.setFeedFilter(filter) },
+                            label = { Text(stringResource(label)) })
+                    }
+                }
+            }
+            if (state.parts.isNotEmpty()) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    item {
+                        FilterChip(selected = state.selectedPartIds.isEmpty(),
+                            onClick = viewModel::clearParts,
+                            label = { Text(stringResource(R.string.forum_all_categories)) })
+                    }
+                    items(browsing.categories, key = { it.part.id }) { category ->
+                        FilterChip(
+                            selected = category.part.id in state.selectedPartIds ||
+                                category.children.any { it.part.id in state.selectedPartIds },
+                            onClick = { viewModel.togglePart(category.part.id) },
+                            label = { Text(category.part.name, maxLines = 1) },
+                        )
+                    }
+                }
+                val parent = browsing.categories.firstOrNull { category ->
+                    category.part.id in state.selectedPartIds ||
+                        category.children.any { it.part.id in state.selectedPartIds }
+                }
+                if (state.contentKind == OfficialForumContentKind.Guide && parent != null &&
+                    parent.children.isNotEmpty()) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(parent.children, key = { it.part.id }) { child ->
+                            FilterChip(selected = child.part.id in state.selectedPartIds,
+                                onClick = { viewModel.togglePart(child.part.id) },
+                                label = { Text(child.part.name, maxLines = 1) })
+                        }
+                    }
+                }
+            }
+            if (browsing.categoryStatus == OfficialForumLoadStatus.Failed) {
+                TextButton(onClick = viewModel::refresh) {
+                    Text(stringResource(R.string.forum_categories_failed))
                 }
             }
         }
         HorizontalDivider()
+        if (state.posts.isNotEmpty() && state.status == OfficialForumLoadStatus.Loading) {
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+        }
+        if (state.posts.isNotEmpty() && state.status == OfficialForumLoadStatus.Failed) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.forum_refresh_failed), Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = viewModel::refresh) { Text(stringResource(R.string.forum_retry)) }
+            }
+        }
         when {
             state.status == OfficialForumLoadStatus.Loading && state.posts.isEmpty() -> {
                 ForumLoading(Modifier.fillMaxSize())
@@ -335,7 +458,8 @@ private fun ForumListPane(
 
             else -> {
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
+                    state = scrollState,
+                    modifier = Modifier.fillMaxSize().testTag("forum-list-content"),
                     contentPadding = PaddingValues(12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
@@ -411,24 +535,26 @@ private fun ForumPostCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                ForumAvatar(post.author, 34.dp)
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = post.author.characterName,
-                        style = MaterialTheme.typography.labelLarge,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = listOfNotNull(
-                            forumTime(post.lastCommentAt ?: post.createdAt),
-                            post.author.locationText.takeIf(String::isNotBlank),
-                        ).joinToString(" · "),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                ForumAuthorIdentity(post.author, Modifier.weight(1f)) {
+                    ForumAvatar(post.author, 34.dp)
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = post.author.characterName,
+                            style = MaterialTheme.typography.labelLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = listOfNotNull(
+                                forumTime(post.lastCommentAt ?: post.createdAt),
+                                post.author.locationText.takeIf(String::isNotBlank),
+                            ).joinToString(" · "),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
                 ForumBadge(post.part.name)
             }
@@ -492,55 +618,89 @@ private fun ForumDetailPane(
     onBack: () -> Unit,
     onOpenPost: (Int) -> Unit,
     modifier: Modifier,
+    scrollState: LazyListState = rememberLazyListState(),
 ) {
     val detailViewModel: OfficialForumDetailViewModel = viewModel(
-        key = "rising-stones-forum-detail-$postId",
+        key = "rising-stones-forum-detail-${System.identityHashCode(service)}-$postId",
         factory = remember(service, postId) {
             OfficialForumDetailViewModelFactory(service, postId)
         },
     )
     val state by detailViewModel.state.collectAsStateWithLifecycle()
-    var pendingDeletion by remember { mutableStateOf<OfficialForumComment?>(null) }
+    val interaction by detailViewModel.interactionState.collectAsStateWithLifecycle()
+    val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
+    val repliesScrollState = key(state.selectedSubCommentRootId) { rememberLazyListState() }
+    val canWrite = detailViewModel.canInteract
+    val canAttachImage = detailViewModel.canAttachCommentImage
+    val importer: ForumCommentImageImportViewModel = viewModel(
+        key = "forum-comment-image-${System.identityHashCode(detailViewModel)}",
+    )
+    val draftRevision = detailViewModel.commentDraftRevision
+    var pendingDeletion by remember(detailViewModel) { mutableStateOf<OfficialForumComment?>(null) }
+    LaunchedEffect(detailViewModel, canWrite, canAttachImage) {
+        detailViewModel.synchronizeActionEligibility()
+        if (!canWrite) pendingDeletion = null
+        if (!canAttachImage) importer.cancelRead()
+    }
+    LaunchedEffect(importer, draftRevision) {
+        importer.synchronizeDraft(draftRevision)
+    }
 
-    Box(modifier) {
-        when {
-            state.status == OfficialForumLoadStatus.Loading && state.detail == null -> {
-                ForumLoading(Modifier.fillMaxSize())
-            }
+    Column(modifier) {
+        if (showBack) TextButton(onClick = onBack) { Text(stringResource(R.string.forum_back)) }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when {
+                state.status == OfficialForumLoadStatus.Loading && state.detail == null -> {
+                    ForumLoading(Modifier.fillMaxSize())
+                }
 
-            state.status == OfficialForumLoadStatus.Failed && state.detail == null -> {
-                ForumRetry(
-                    text = stringResource(R.string.forum_load_failed),
-                    onRetry = detailViewModel::load,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
+                state.detail == null && state.status in setOf(
+                    OfficialForumLoadStatus.Failed, OfficialForumLoadStatus.Idle,
+                ) -> {
+                    ForumRetry(
+                        text = stringResource(R.string.forum_load_failed),
+                        onRetry = detailViewModel::load,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
 
-            state.detail != null -> {
-                ForumDetailContent(
-                    state = state,
-                    viewModel = detailViewModel,
-                    showBack = showBack,
-                    onBack = onBack,
-                    onOpenPost = onOpenPost,
-                    onDeleteRequested = { pendingDeletion = it },
-                    modifier = Modifier.fillMaxSize(),
-                )
+                state.detail != null -> {
+                    ForumDetailContent(
+                        state = state,
+                        interaction = interaction,
+                        viewModel = detailViewModel,
+                        scrollState = scrollState,
+                        showBack = false,
+                        onBack = onBack,
+                        onOpenPost = onOpenPost,
+                        onDeleteRequested = { pendingDeletion = it },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
     }
 
-    state.selectedSubCommentRootId?.let { rootId ->
+    state.selectedSubCommentRootId?.takeIf { lifecycleState.isAtLeast(Lifecycle.State.STARTED) }?.let { rootId ->
         val root = state.comments.firstOrNull { it.id == rootId }
         ModalBottomSheet(onDismissRequest = detailViewModel::dismissSubComments) {
             ForumRepliesSheet(
                 root = root,
                 replies = state.subCommentsByRootId[rootId].orEmpty(),
+                scrollState = repliesScrollState,
                 isLoading = rootId in state.loadingSubCommentIds,
                 onClose = detailViewModel::dismissSubComments,
                 onDeleteRequested = { pendingDeletion = it },
                 onLike = detailViewModel::likeComment,
                 likingCommentIds = state.likingCommentIds,
+                canWrite = canWrite,
+                onReply = { reply ->
+                    detailViewModel.openCommentComposer(OfficialForumReplyTarget(reply.id, rootId,
+                        reply.author.characterName))
+                },
+                hasError = rootId in state.subCommentErrorIds,
+                actionError = interaction.actionError,
+                onRetry = { root?.let(detailViewModel::openSubComments) },
             )
         }
     }
@@ -565,21 +725,29 @@ private fun ForumDetailPane(
             },
         )
     }
+
+    if (interaction.isComposerOpen && canWrite) {
+        ForumCommentComposer(interaction, detailViewModel, state.isSubmittingComment, importer)
+    }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ForumDetailContent(
     state: OfficialForumDetailUiState,
+    interaction: OfficialForumDetailInteractionState,
     viewModel: OfficialForumDetailViewModel,
     showBack: Boolean,
     onBack: () -> Unit,
     onOpenPost: (Int) -> Unit,
     onDeleteRequested: (OfficialForumComment) -> Unit,
+    scrollState: LazyListState,
     modifier: Modifier,
 ) {
     val detail = state.detail ?: return
     LazyColumn(
-        modifier = modifier,
+        state = scrollState,
+        modifier = modifier.testTag("forum-detail-content"),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -590,11 +758,43 @@ private fun ForumDetailContent(
                 }
             }
         }
-        item { ForumDetailHeader(detail) }
+        item {
+            ForumDetailHeader(detail)
+            if (viewModel.canInteract) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = viewModel::likePost, enabled = !state.isLikingPost,
+                        modifier = Modifier.testTag("forum-like-post")) {
+                        Text(stringResource(if (detail.isLiked == true) R.string.forum_unlike_action
+                            else R.string.forum_like_action, detail.likeCount))
+                    }
+                    TextButton(onClick = viewModel::starPost, enabled = !state.isStarringPost,
+                        modifier = Modifier.testTag("forum-star-post")) {
+                        Text(stringResource(if (detail.isStarred == true) R.string.forum_unstar_action
+                            else R.string.forum_star_action, detail.starCount))
+                    }
+                    TextButton(onClick = viewModel::resumeCommentComposer,
+                        enabled = !state.isSubmittingComment,
+                        modifier = Modifier.testTag("forum-new-comment")) {
+                        Text(stringResource(if (interaction.replyTarget != null) R.string.forum_continue_draft
+                            else R.string.forum_write_comment))
+                    }
+                }
+            }
+            interaction.actionError?.let { ForumInteractionErrorText(it) }
+            if (state.status == OfficialForumLoadStatus.Failed) ForumRetry(
+                stringResource(R.string.forum_refresh_failed), viewModel::load, Modifier.fillMaxWidth())
+        }
         item { ForumPostBody(detail, onOpenPost) }
         if (detail.votes.isNotEmpty()) {
             items(detail.votes, key = OfficialForumPostVote::id) { vote ->
-                ForumVoteCard(vote)
+                ForumInteractiveVote(vote,
+                    selected = interaction.voteSelections[vote.id].orEmpty(),
+                    isSubmitting = vote.id in state.submittingVoteIds,
+                    canWrite = viewModel.canInteract,
+                    resultsAvailable = vote.id in interaction.voteResultsAvailable,
+                    error = interaction.voteErrors[vote.id],
+                    onSelection = { viewModel.setVoteSelection(vote.id, it) },
+                    onSubmit = { viewModel.submitSelectedVote(vote.id) })
             }
         }
         item {
@@ -606,6 +806,11 @@ private fun ForumDetailContent(
                 fontWeight = FontWeight.SemiBold,
             )
             ForumCommentControls(state, viewModel)
+            if (interaction.commentSuccessRevision > 0) Text(stringResource(R.string.forum_comment_sent))
+            if (state.commentsStatus == OfficialForumLoadStatus.Failed && state.comments.isNotEmpty()) {
+                ForumRetry(stringResource(R.string.forum_comments_refresh_failed),
+                    { viewModel.refreshComments(force = true) }, Modifier.fillMaxWidth())
+            }
         }
         when {
             state.commentsStatus == OfficialForumLoadStatus.Loading && state.comments.isEmpty() -> {
@@ -640,6 +845,9 @@ private fun ForumDetailContent(
                         onDelete = onDeleteRequested,
                         onLike = viewModel::likeComment,
                         isLiking = comment.id in state.likingCommentIds,
+                        canWrite = viewModel.canInteract,
+                        onReply = { target -> viewModel.openCommentComposer(
+                            OfficialForumReplyTarget(target.id, target.id, target.author.characterName)) },
                     )
                 }
             }
@@ -674,21 +882,23 @@ private fun ForumDetailHeader(detail: OfficialForumPostDetail) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            ForumAvatar(detail.author, 42.dp)
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = detail.author.characterName,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    text = listOfNotNull(
-                        detail.author.locationText.takeIf(String::isNotBlank),
-                        forumTime(detail.createdAt),
-                    ).joinToString(" · "),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            ForumAuthorIdentity(detail.author, Modifier.weight(1f)) {
+                ForumAvatar(detail.author, 42.dp)
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = detail.author.characterName,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = listOfNotNull(
+                            detail.author.locationText.takeIf(String::isNotBlank),
+                            forumTime(detail.createdAt),
+                        ).joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             ForumBadge(detail.part.name)
         }
@@ -931,40 +1141,6 @@ private fun ForumRemoteContentImage(url: String) {
 }
 
 @Composable
-private fun ForumVoteCard(vote: OfficialForumPostVote) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        shape = RoundedCornerShape(12.dp),
-    ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = vote.title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            vote.options.forEach { option ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(
-                        text = if (option.isParticipant) "✓ ${option.title}" else option.title,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        text = option.totalVoteCount.toString(),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun ForumCommentControls(
     state: OfficialForumDetailUiState,
     viewModel: OfficialForumDetailViewModel,
@@ -1014,6 +1190,7 @@ private fun ForumCommentOrderChip(
     FilterChip(selected = selected, onClick = onClick, label = { Text(label) })
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ForumCommentCard(
     comment: OfficialForumComment,
@@ -1022,6 +1199,8 @@ private fun ForumCommentCard(
     onDelete: (OfficialForumComment) -> Unit = {},
     onLike: (OfficialForumComment) -> Unit = {},
     isLiking: Boolean = false,
+    canWrite: Boolean = false,
+    onReply: (OfficialForumComment) -> Unit = {},
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
@@ -1031,41 +1210,47 @@ private fun ForumCommentCard(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                ForumAvatar(comment.author, 34.dp)
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = comment.author.characterName,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = listOfNotNull(
-                            forumTime(comment.createdAt),
-                            comment.ipLocation?.takeIf(String::isNotBlank),
-                        ).joinToString(" · "),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                ForumAuthorIdentity(comment.author, Modifier.fillMaxWidth()) {
+                    ForumAvatar(comment.author, 34.dp)
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = comment.author.characterName,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.testTag("forum-comment-author-${comment.id}"),
+                        )
+                        Text(
+                            text = listOfNotNull(
+                                forumTime(comment.createdAt),
+                                comment.ipLocation?.takeIf(String::isNotBlank),
+                            ).joinToString(" · "),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
-                if (comment.isPostAuthor) {
-                    ForumBadge(stringResource(R.string.forum_only_author))
-                }
-                TextButton(onClick = { onLike(comment) }, enabled = !isLiking) {
-                    Text(
-                        text = stringResource(R.string.forum_like_count, comment.likeCount),
-                        color = if (comment.isLiked) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            Color.Unspecified
-                        },
-                    )
-                }
-                if (comment.isMine) {
-                    TextButton(onClick = { onDelete(comment) }) {
-                        Text(stringResource(R.string.forum_delete))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (comment.isPostAuthor) {
+                        ForumBadge(stringResource(R.string.forum_only_author))
+                    }
+                    TextButton(onClick = { onLike(comment) }, enabled = canWrite && !isLiking) {
+                        Text(
+                            text = stringResource(R.string.forum_like_count, comment.likeCount),
+                            color = if (comment.isLiked) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                Color.Unspecified
+                            },
+                        )
+                    }
+                    if (comment.isMine && canWrite) {
+                        TextButton(onClick = { onDelete(comment) }) {
+                            Text(stringResource(R.string.forum_delete))
+                        }
                     }
                 }
             }
@@ -1077,19 +1262,23 @@ private fun ForumCommentCard(
                 )
             }
             Text(comment.bodyText, style = MaterialTheme.typography.bodyMedium)
+            if (canWrite) TextButton(onClick = { onReply(comment) },
+                modifier = Modifier.testTag("forum-reply-${comment.id}")) {
+                Text(stringResource(R.string.forum_reply))
+            }
             comment.imageUrls.forEach { url -> ForumRemoteContentImage(url) }
             previews.take(2).forEach { preview ->
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     shape = RoundedCornerShape(8.dp),
                 ) {
-                    Text(
-                        text = "${preview.author.characterName}: ${preview.bodyText}",
-                        modifier = Modifier.padding(8.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Column(Modifier.padding(8.dp)) {
+                        ForumAuthorIdentity(preview.author) {
+                            Text(preview.author.characterName, style = MaterialTheme.typography.labelMedium)
+                        }
+                        Text(preview.bodyText, style = MaterialTheme.typography.bodySmall,
+                            maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    }
                 }
             }
             if (comment.childCount > 0) {
@@ -1105,11 +1294,17 @@ private fun ForumCommentCard(
 private fun ForumRepliesSheet(
     root: OfficialForumComment?,
     replies: List<OfficialForumComment>,
+    scrollState: LazyListState,
     isLoading: Boolean,
     onClose: () -> Unit,
     onDeleteRequested: (OfficialForumComment) -> Unit,
     onLike: (OfficialForumComment) -> Unit,
     likingCommentIds: Set<Int>,
+    canWrite: Boolean,
+    onReply: (OfficialForumComment) -> Unit,
+    hasError: Boolean,
+    actionError: OfficialForumInteractionError?,
+    onRetry: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -1133,31 +1328,37 @@ private fun ForumRepliesSheet(
         }
         root?.let {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "${it.author.characterName}: ${it.bodyText}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
+                Column(Modifier.weight(1f)) {
+                    ForumAuthorIdentity(it.author) {
+                        Text(it.author.characterName, style = MaterialTheme.typography.labelMedium)
+                    }
+                    Text(it.bodyText, style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 3, overflow = TextOverflow.Ellipsis)
+                }
                 TextButton(
                     onClick = { onLike(it) },
-                    enabled = it.id !in likingCommentIds,
+                    enabled = canWrite && it.id !in likingCommentIds,
                 ) {
                     Text(
                         text = stringResource(R.string.forum_like_count, it.likeCount),
                         color = if (it.isLiked) MaterialTheme.colorScheme.primary else Color.Unspecified,
                     )
                 }
-                if (it.isMine) {
+                if (it.isMine && canWrite) {
                     TextButton(onClick = { onDeleteRequested(it) }) {
                         Text(stringResource(R.string.forum_delete))
                     }
                 }
             }
             Spacer(Modifier.height(8.dp))
+            if (canWrite) TextButton(onClick = { onReply(it) },
+                modifier = Modifier.testTag("forum-reply-${it.id}")) {
+                Text(stringResource(R.string.forum_reply))
+            }
         }
+        actionError?.let { ForumInteractionErrorText(it) }
+        if (hasError) ForumRetry(stringResource(R.string.forum_load_failed), onRetry, Modifier.fillMaxWidth())
         when {
             isLoading && replies.isEmpty() -> ForumLoading(Modifier.fillMaxWidth().height(100.dp))
             replies.isEmpty() -> ForumMessage(
@@ -1166,6 +1367,8 @@ private fun ForumRepliesSheet(
             )
 
             else -> LazyColumn(
+                modifier = Modifier.testTag("forum-replies-content"),
+                state = scrollState,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = PaddingValues(bottom = 24.dp),
             ) {
@@ -1177,6 +1380,8 @@ private fun ForumRepliesSheet(
                         onDelete = onDeleteRequested,
                         onLike = onLike,
                         isLiking = reply.id in likingCommentIds,
+                        canWrite = canWrite,
+                        onReply = onReply,
                     )
                 }
             }
@@ -1282,3 +1487,14 @@ private val ForumTimeFormatter: DateTimeFormatter =
         .withZone(ZoneId.systemDefault())
 
 private fun forumTime(value: Instant?): String? = value?.let(ForumTimeFormatter::format)
+
+
+@Composable
+fun RisingStonesForumPostScreen(service: OfficialForumService, postId: Int, onNavigateBack: () -> Unit) {
+    var selectedId by androidx.compose.runtime.saveable.rememberSaveable(postId) { mutableStateOf(postId) }
+    BackHandler(onBack = onNavigateBack)
+    Box(Modifier.fillMaxSize().padding(WindowInsets.safeDrawing.asPaddingValues()), contentAlignment = Alignment.TopCenter) {
+        ForumDetailPane(service, selectedId, true, onNavigateBack, { selectedId = it },
+            Modifier.widthIn(max = 920.dp).fillMaxSize())
+    }
+}

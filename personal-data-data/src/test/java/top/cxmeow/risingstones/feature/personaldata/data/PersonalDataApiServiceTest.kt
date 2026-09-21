@@ -91,6 +91,7 @@ class PersonalDataApiServiceTest {
         )
         assertFalse(frontline.sections.first().entries.first().fields.any { it.key == "character_id" })
         assertEquals("120", fishing.metrics.first().value)
+        assertEquals("85", fishing.metrics.single { it.id == "succ_rate" }.value)
         assertEquals("12", savage.metrics.first().value)
         assertEquals("302", glamour.metrics.single { it.id == "vanity_times" }.value)
 
@@ -189,7 +190,8 @@ private class RecordingPersonalDataCredential : RisingStonesSessionProvider {
     val contexts = mutableListOf<RisingStonesRequestContext>()
     override val capabilities = setOf(RisingStonesCapability.PersonalData)
 
-    override suspend fun currentAuthorizer() = RisingStonesRequestAuthorizer { context, _ ->
+    override suspend fun currentAuthorizer() = RisingStonesRequestAuthorizer { context, sink ->
+        sink.set("Authorization", "Fixture token")
         contexts += context
     }
 }
@@ -204,7 +206,7 @@ private class PersonalDataTransport : RisingStonesHttpClient {
             path.endsWith("dataOpenStatus") -> """{"code":10000,"data":{"pvp":"1","jue4":"1","fishing":"1","lingshi":"1","vanity":"1"}}"""
             path.endsWith("frontline1TotalNew") -> """{"code":10000,"data":[{"data_time":"total","fight_times":"30","win_rate":"0.4","clear_time":"19.5","occupy_count":"41","kill_rank":"86","heal_rank":"52","damaged_rank":"37","damage_rank":"74","dead_rank":"63","assist_rank":"81"},{"data_time":"30days","fight_times":"10"}]}"""
             path.endsWith("frontline2WeekNew") -> """{"code":10000,"data":[{"part_date":"2026-07-21","fight_times":"2","character_id":"secret"}]}"""
-            path.endsWith("fishTotal1") -> """{"code":10000,"data":{"total_times":120,"succ_rate":"84.5","sea_times":"3","max_sea_score":"10321"}}"""
+            path.endsWith("fishTotal1") -> """{"code":10000,"data":{"total_times":120,"succ_rate":"0.845","sea_times":"3","max_sea_score":"10321"}}"""
             path.endsWith("getLingShiTotal") -> """{"code":10000,"data":[{"territory_num":"12","enter_num":"48","finish_times":"17","elapsed_time":"920"}]}"""
             path.endsWith("getDressTotal7") -> """{"code":10000,"data":[{"washing_num":"4","color_times":"21","vanity_times":"302"}]}"""
             path.endsWith("gaoNanFirst1") -> """{"code":10000,"data":[{"clear_times":"41","enter_before_clear":"50","job_name":"绝枪战士","territory_type":"968","elapsed_time":"226912","dead_times":"814","log_time":"2022-10-07 23:19:48"}]}"""

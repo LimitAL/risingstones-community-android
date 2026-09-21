@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="dynamic_title">Activity</string>
+    <string name="dynamic_back">Back</string>
+    <string name="dynamic_refresh">Refresh</string>
+    <string name="dynamic_select">Select an activity to read it</string>
+    <string name="dynamic_sign_in">Your session has expired. Sign in again.</string>
+    <string name="dynamic_unavailable">Activity is unavailable for this session.</string>
+    <string name="dynamic_empty">No activity yet. Follow community members to see their updates.</string>
+    <string name="dynamic_more">Load more</string>
+    <string name="dynamic_source">View source</string>
+    <string name="dynamic_comments">Comments</string>
+    <string name="dynamic_no_comments">No comments yet</string>
+    <string name="dynamic_replies">View %1$d replies</string>
+    <string name="dynamic_counts">%1$d comments · %2$d likes</string>
+    <string name="dynamic_reply_to">Reply to %1$s</string>
+    <string name="dynamic_image">Open image</string>
+    <string name="dynamic_close">Close</string>
+    <string name="dynamic_retry">Retry</string>
+    <string name="dynamic_refresh_failed">Refresh failed. Previous content is still available.</string>
+    <string name="dynamic_failed">Could not load activity.</string>
+    <string name="dynamic_origin_post">Shared topic</string>
+    <string name="dynamic_origin_guide">Shared guide</string>
+    <string name="dynamic_origin_glamour">Shared glamour</string>
+    <string name="dynamic_origin_recruitment">Shared recruitment</string>
+    <string name="dynamic_unknown_author">Community member</string>
+    <string name="dynamic_open_author_profile">Open %1$s community profile</string>
+</resources>

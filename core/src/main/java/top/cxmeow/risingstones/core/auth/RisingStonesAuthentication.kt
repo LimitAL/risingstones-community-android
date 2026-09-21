@@ -15,6 +15,11 @@ enum class RisingStonesCapability {
     RecruitmentWrite,
     GlamourAuthenticated,
     PersonalData,
+    DynamicRead,
+    MessageRead,
+    GuildRead,
+    GuildWrite,
+    GuildImageUpload,
 }
 
 enum class RisingStonesCredentialSource {

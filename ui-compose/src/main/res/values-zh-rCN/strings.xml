@@ -28,4 +28,9 @@
     <string name="rising_stones_capability_personal_data">个人数据中心</string>
     <string name="rising_stones_copy_capability_report">复制脱敏报告</string>
     <string name="rising_stones_capability_report_copied">已复制脱敏报告</string>
+    <string name="rising_stones_capability_dynamic_read">社区动态</string>
+    <string name="rising_stones_capability_message_read">消息读取</string>
+    <string name="rising_stones_capability_guild_read">我的部队与相册</string>
+    <string name="rising_stones_capability_guild_write">部队互动</string>
+    <string name="rising_stones_capability_guild_image_upload">部队图片上传</string>
 </resources>

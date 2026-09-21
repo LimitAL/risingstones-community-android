@@ -2,36 +2,57 @@ package top.cxmeow.risingstones.feature.forum.data
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import top.cxmeow.risingstones.core.auth.RisingStonesHeaderSink
 import top.cxmeow.risingstones.core.auth.RisingStonesAuthenticationRequirement
 import top.cxmeow.risingstones.core.auth.RisingStonesCapability
+import top.cxmeow.risingstones.core.auth.RisingStonesCapabilityAttempt
+import top.cxmeow.risingstones.core.auth.RisingStonesCapabilityAttemptGuard
+import top.cxmeow.risingstones.core.auth.RisingStonesExplicitCapabilityProvider
 import top.cxmeow.risingstones.core.auth.RisingStonesRequestAuthorizer
 import top.cxmeow.risingstones.core.auth.RisingStonesRequestContext
 import top.cxmeow.risingstones.core.auth.RisingStonesSessionProvider
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumIdentityConflictHandler
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumActionEligibilityService
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumInteractionService
 import top.cxmeow.risingstones.network.RisingStonesApiQueryItem
 import top.cxmeow.risingstones.network.RisingStonesApiRequest
 import top.cxmeow.risingstones.network.RisingStonesHttpMethod
 import top.cxmeow.risingstones.network.RisingStonesHttpRequest
 import top.cxmeow.risingstones.network.RisingStonesPublicApiClient
+import top.cxmeow.risingstones.network.RisingStonesResponsePolicy
 import top.cxmeow.risingstones.network.RisingStonesHttpException
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumAuthor
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumBrowsingService
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumBrowseQuery
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumBrowsePage
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumCategory
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumContentKind
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumFeedFilter
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumComment
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumCommentAuthoringService
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumCommentDraft
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumCommentImageUpload
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumCommentMention
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumCommentQuery
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumMentionCandidate
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumException
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumListQuery
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumIdentityConflictState
@@ -39,6 +60,7 @@ import top.cxmeow.risingstones.feature.forum.domain.OfficialForumPage
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumPart
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumPartFilter
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumPostDetail
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumPostInteraction
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumPostSummary
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumPostVote
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumPostVoteOption
@@ -48,9 +70,7 @@ import top.cxmeow.risingstones.feature.forum.domain.OfficialForumSubCommentQuery
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumVoteDraft
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumVoteResult
 import java.net.URLEncoder
-import java.net.URI
 import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
 import java.security.SecureRandom
 import java.time.Instant
 import java.time.LocalDateTime
@@ -58,11 +78,14 @@ import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.UUID
-import javax.crypto.Mac
-import javax.crypto.spec.SecretKeySpec
 
 private val EmptyRisingStonesIdentityConflictState =
     MutableStateFlow(OfficialForumIdentityConflictState())
+
+private data class ForumWriteAuthorization(
+    val authorizer: RisingStonesRequestAuthorizer,
+    val attempt: RisingStonesCapabilityAttempt?,
+)
 
 class OfficialForumApiService(
     private val client: RisingStonesPublicApiClient,
@@ -70,9 +93,22 @@ class OfficialForumApiService(
     private val identityConflictHandler: OfficialForumIdentityConflictHandler? =
         sessionProvider as? OfficialForumIdentityConflictHandler,
     private val json: Json = Json { ignoreUnknownKeys = true; explicitNulls = false },
-) : OfficialForumService {
+) : OfficialForumBrowsingService, OfficialForumInteractionService, OfficialForumCommentAuthoringService,
+    OfficialForumActionEligibilityService {
     override val canPerformAuthenticatedWrites: Boolean
         get() = RisingStonesCapability.ForumWrite in sessionProvider?.capabilities.orEmpty()
+    override val canUploadCommentImages: Boolean
+        get() = RisingStonesCapability.ForumImageUpload in sessionProvider?.capabilities.orEmpty()
+    override val canAttemptAuthenticatedWrites: Boolean
+        get() = canPerformAuthenticatedWrites ||
+            (sessionProvider as? RisingStonesExplicitCapabilityProvider)
+                ?.canAttemptCapability(RisingStonesCapability.ForumWrite) == true
+    override val canAttemptCommentImageUpload: Boolean
+        get() = canUploadCommentImages ||
+            (sessionProvider as? RisingStonesExplicitCapabilityProvider)
+                ?.canAttemptCapability(RisingStonesCapability.ForumImageUpload) == true
+    override val canReadMentionCandidates: Boolean
+        get() = RisingStonesCapability.AccountRead in sessionProvider?.capabilities.orEmpty()
     override val identityConflictState: StateFlow<OfficialForumIdentityConflictState>
         get() = identityConflictHandler?.identityConflictState
             ?: EmptyRisingStonesIdentityConflictState
@@ -85,40 +121,50 @@ class OfficialForumApiService(
         identityConflictHandler?.cancelIdentityConflict()
     }
 
-    override suspend fun fetchParts(): List<OfficialForumPartFilter> {
+    override suspend fun fetchParts(): List<OfficialForumPartFilter> =
+        fetchCategories(OfficialForumContentKind.Post).map { it.part }
+
+    override suspend fun fetchCategories(kind: OfficialForumContentKind): List<OfficialForumCategory> {
         val response = get<PartListResponse>(
             "api/home/posts/partList",
-            listOf(query("type", "1")),
+            listOf(query("type", kind.wireValue)),
         ).verified()
-        return response.data.orEmpty().mapNotNull(PartDto::domain).sortedWith(
-            compareByDescending<OfficialForumPartFilter> { it.weight }.thenBy { it.id },
-        )
+        return (response.data ?: throw OfficialForumException.MissingPayload).categories()
     }
 
     override suspend fun fetchPosts(
         query: OfficialForumListQuery,
-    ): OfficialForumPage<OfficialForumPostSummary> {
-        val page = query.page.coerceAtLeast(1)
-        val limit = query.limit.coerceAtLeast(1)
+    ): OfficialForumPage<OfficialForumPostSummary> = fetchBrowsePage(OfficialForumBrowseQuery(query)).page
+
+    override suspend fun fetchBrowsePage(query: OfficialForumBrowseQuery): OfficialForumBrowsePage {
+        val page = query.list.page.coerceAtLeast(1)
+        val limit = query.list.limit.coerceAtLeast(1)
         val response = get<PostListResponse>(
             "api/home/posts/postsList",
             listOf(
-                query("type", query.contentKind.wireValue),
-                query("is_top", 0),
-                query("is_refine", 0),
-                query("part_id", query.partIds.joinToString(",")),
+                query("type", query.list.contentKind.wireValue),
+                query("is_top", if (query.filter == OfficialForumFeedFilter.Pinned) 1 else 0),
+                query("is_refine", if (query.filter == OfficialForumFeedFilter.Refined) 1 else 0),
+                query("part_id", query.list.partIds.joinToString(",")),
                 query("hotType", ""),
-                query("order", ""),
+                query("order", if (query.filter == OfficialForumFeedFilter.Latest) "latest" else ""),
                 query("page", page),
                 query("limit", limit),
-            ),
+            ) + listOfNotNull(query.pageTime?.takeIf { page > 1 && it.isNotBlank() }
+                ?.let { query("pageTime", it) }),
         ).verified()
-        return response.data.page(page, limit)
+        val payload = response.data ?: throw OfficialForumException.MissingPayload
+        return OfficialForumBrowsePage(payload.page(page, limit), payload.pageTime.stringValue)
     }
 
     override suspend fun searchPosts(
         query: OfficialForumSearchQuery,
-    ): OfficialForumPage<OfficialForumPostSummary> {
+    ): OfficialForumPage<OfficialForumPostSummary> = searchBrowsePage(query).page
+
+    override suspend fun searchBrowsePage(
+        query: OfficialForumSearchQuery,
+        pageTime: String?,
+    ): OfficialForumBrowsePage {
         val page = query.page.coerceAtLeast(1)
         val limit = query.limit.coerceAtLeast(1)
         val response = get<PostListResponse>(
@@ -130,19 +176,33 @@ class OfficialForumApiService(
                 query("orderBy", query.order.wireValue),
                 query("page", page),
                 query("limit", limit),
-                query("pageTime", ""),
+                query("pageTime", pageTime?.takeIf { page > 1 }.orEmpty()),
                 query("tempsuid", temporarySessionId),
             ),
         ).verified()
-        return response.data.page(page, limit)
+        val payload = response.data ?: throw OfficialForumException.MissingPayload
+        return OfficialForumBrowsePage(payload.page(page, limit), payload.pageTime.stringValue)
     }
 
-    override suspend fun fetchPostDetail(id: Int): OfficialForumPostDetail {
+    override suspend fun fetchPostDetail(id: Int): OfficialForumPostDetail = fetchPostInteraction(id).detail
+
+    override suspend fun fetchPostInteraction(id: Int): OfficialForumPostInteraction {
         val response = get<PostDetailResponse>(
             "api/home/posts/postsDetail",
             listOf(query("id", id)),
         ).verified()
-        return response.data?.domain() ?: throw OfficialForumException.MissingPayload
+        val payload = response.data ?: throw OfficialForumException.MissingPayload
+        val detail = json.decodeFromJsonElement<PostDetailDto>(payload).domain()
+            ?: throw OfficialForumException.MissingPayload
+        val rawVotes = payload["voteInfo"] as? JsonArray ?: payload["vote_info"] as? JsonArray
+        // The website checks presence across the raw list, not the count or participation.
+        val resultsAvailable = rawVotes?.all { option ->
+            (option as? JsonObject)?.containsKey("total_vote_num") == true
+        } == true
+        return OfficialForumPostInteraction(
+            detail,
+            if (resultsAvailable) detail.votes.mapTo(mutableSetOf()) { it.id } else emptySet(),
+        )
     }
 
     override suspend fun fetchComments(
@@ -185,64 +245,141 @@ class OfficialForumApiService(
 
     override suspend fun likeComment(id: Int): Int = performLike(id, targetType = "2")
 
-    private suspend fun performLike(id: Int, targetType: String): Int = formPost<MutationResponse>(
+    private suspend fun performLike(id: Int, targetType: String): Int = formPost<MutationResponse, Int>(
         path = "api/home/posts/like",
         fields = listOf("id" to id.toString(), "type" to targetType, "tempsuid" to temporarySessionId),
-    ).verified().data.intValue ?: 0
+    ) { response -> response.data.intValue?.takeIf { it == 1 || it == -1 }
+        ?: throw OfficialForumException.MissingPayload }
 
-    override suspend fun starPost(id: Int): Int = formPost<MutationResponse>(
+    override suspend fun starPost(id: Int): Int = formPost<MutationResponse, Int>(
         path = "api/home/posts/star",
         fields = listOf("posts_id" to id.toString(), "tempsuid" to temporarySessionId),
-    ).verified().data.intValue ?: 0
+    ) { response -> response.data.intValue?.takeIf { it == 1 || it == -1 }
+        ?: throw OfficialForumException.MissingPayload }
 
     override suspend fun uploadCommentImage(image: OfficialForumCommentImageUpload): String {
-        if (RisingStonesCapability.ForumImageUpload !in sessionProvider?.capabilities.orEmpty()) {
-            throw OfficialForumException.AuthenticationRequired
+        if (image.bytes.isEmpty() || image.bytes.size > MaximumCommentImageBytes) {
+            throw OfficialForumException.ImageUploadFailed
         }
-        if (image.bytes.isEmpty()) throw OfficialForumException.ImageUploadFailed
-        val token = get<CosTokenResponse>(
-            "api/common/getCOSTokenI",
-            listOf(query("channel", "posts"), query("tempsuid", temporarySessionId)),
-        )
-        if (token.code !in setOf(10000, 10002)) {
-            throw OfficialForumException.Business(token.code, token.message)
-        }
-        val payload = token.data ?: throw OfficialForumException.ImageUploadFailed
-        val now = Instant.now().epochSecond
-        if (payload.startTime >= payload.expiredTime || now >= payload.expiredTime ||
-            !payload.keyDir.startsWith("posts/") || payload.keyDir.startsWith("/") ||
-            payload.keyDir.contains("..")
-        ) throw OfficialForumException.ImageUploadFailed
         val filename = RisingStonesCos.objectName(image.mimeType)
-        val objectKey = "${payload.keyDir}/$filename"
-        val uploadUrl = "https://ff14risingstones.gcloud.com.cn/$objectKey"
-        val authorization = RisingStonesCos.authorization(
-            url = uploadUrl,
-            contentLength = image.bytes.size,
-            secretId = payload.credentials.tmpSecretId,
-            secretKey = payload.credentials.tmpSecretKey,
-            startTime = payload.startTime,
-            expiredTime = payload.expiredTime,
-        )
-        client.executeAbsolute(
-            RisingStonesHttpRequest(
+        val path = "api/common/getCOSTokenI"
+        val authorization = writeAuthorization(path, RisingStonesCapability.ForumImageUpload)
+        try {
+            val tokenResponse = try {
+                client.execute(
+                    RisingStonesApiRequest(
+                        path,
+                        query = listOf(query("channel", "default"), query("tempsuid", temporarySessionId)),
+                        headers = authorization.authorizer.headers(
+                            path,
+                            RisingStonesAuthenticationRequirement.Required,
+                            RisingStonesCapability.ForumImageUpload,
+                        ),
+                    ),
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (error.isHttpAuthenticationFailure()) refreshAfterWriteAuthenticationFailure()
+                throw OfficialForumException.ImageUploadFailed
+            }
+            if (tokenResponse.statusCode !in 200..299) {
+                if (tokenResponse.statusCode in setOf(401, 403)) refreshAfterWriteAuthenticationFailure()
+                throw OfficialForumException.ImageUploadFailed
+            }
+            val token = try {
+                json.decodeFromString<CosTokenResponse>(tokenResponse.body.decodeToString())
+            } catch (_: SerializationException) {
+                throw OfficialForumException.ImageUploadFailed
+            }
+            if (!RisingStonesResponsePolicy.accepts(token.code)) {
+                if (token.isAuthenticationFailure()) refreshAfterWriteAuthenticationFailure()
+                throw OfficialForumException.Business(token.code, token.message)
+            }
+            val payload = token.data ?: throw OfficialForumException.ImageUploadFailed
+            val now = Instant.now().epochSecond
+            if (payload.startTime <= 0 || payload.startTime > now || now >= payload.expiredTime ||
+                payload.startTime >= payload.expiredTime || !safeObjectDirectory(payload.keyDir) ||
+                listOf(payload.credentials.tmpSecretId, payload.credentials.tmpSecretKey,
+                    payload.credentials.sessionToken).any { it.isBlank() || it.any(Char::isISOControl) }
+            ) throw OfficialForumException.ImageUploadFailed
+            val objectKey = "${payload.keyDir}/$filename"
+            val uploadUrl = "https://ff14risingstones.gcloud.com.cn/$objectKey"
+            val cosAuthorization = RisingStonesCos.authorization(
                 url = uploadUrl,
-                method = RisingStonesHttpMethod.Put,
-                headers = mapOf(
-                    "Content-Type" to image.mimeType,
-                    "Content-Length" to image.bytes.size.toString(),
-                    "Authorization" to authorization,
-                    "x-cos-security-token" to payload.credentials.sessionToken,
-                ),
-                body = image.bytes,
-                contentType = image.mimeType,
-            ),
-        )
-        return uploadUrl
+                contentLength = image.bytes.size,
+                secretId = payload.credentials.tmpSecretId,
+                secretKey = payload.credentials.tmpSecretKey,
+                startTime = payload.startTime,
+                expiredTime = payload.expiredTime,
+            )
+            currentCoroutineContext().ensureActive()
+            if (authorization.attempt != null) {
+                val guard = authorization.attempt as? RisingStonesCapabilityAttemptGuard
+                    ?: throw OfficialForumException.AuthenticationRequired
+                if (!guard.isCurrent()) throw OfficialForumException.AuthenticationRequired
+            } else if (!canUploadCommentImages) {
+                throw OfficialForumException.AuthenticationRequired
+            }
+            val upload = try {
+                client.executeAbsolute(
+                    RisingStonesHttpRequest(
+                        url = uploadUrl,
+                        method = RisingStonesHttpMethod.Put,
+                        headers = mapOf(
+                            "Content-Type" to image.mimeType,
+                            "Content-Length" to image.bytes.size.toString(),
+                            "Authorization" to cosAuthorization,
+                            "x-cos-security-token" to payload.credentials.sessionToken,
+                        ),
+                        body = image.bytes,
+                        contentType = image.mimeType,
+                    ),
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (error.isHttpAuthenticationFailure()) refreshAfterWriteAuthenticationFailure()
+                throw OfficialForumException.ImageUploadFailed
+            }
+            if (upload.statusCode in setOf(401, 403)) refreshAfterWriteAuthenticationFailure()
+            if (upload.statusCode !in 200..299) throw OfficialForumException.ImageUploadFailed
+            if (authorization.attempt?.complete() == false) throw OfficialForumException.AuthenticationRequired
+            return uploadUrl
+        } finally {
+            authorization.attempt?.close()
+        }
+    }
+
+    override suspend fun fetchMentionCandidates(): List<OfficialForumMentionCandidate> {
+        val payload = readMentionCandidates().verified().data as? JsonObject
+            ?: throw OfficialForumException.MissingPayload
+        val rows = payload["rows"] as? JsonArray ?: throw OfficialForumException.MissingPayload
+        return rows.mapNotNull { element ->
+            val row = element as? JsonObject ?: return@mapNotNull null
+            val uuid = row.mentionString("uuid")?.takeIf(String::isCommentMentionIdentity) ?: return@mapNotNull null
+            val name = row.mentionString("character_name")?.takeIf(String::isCommentMentionIdentity) ?: return@mapNotNull null
+            OfficialForumMentionCandidate(
+                uuid = uuid,
+                name = name,
+                avatarUrl = row.mentionString("avatar").remoteUrl(),
+                areaName = row.mentionString("area_name").orEmpty(),
+                groupName = row.mentionString("group_name").orEmpty(),
+            )
+        }
     }
 
     override suspend fun submitComment(draft: OfficialForumCommentDraft): List<Int> =
-        formPost<CommentSubmitResponse>(
+        submitCommentWithMentions(draft, emptyList())
+
+    override suspend fun submitCommentWithMentions(
+        draft: OfficialForumCommentDraft,
+        mentions: List<OfficialForumCommentMention>,
+    ): List<Int> {
+        require(mentions.all { it.uuid.isCommentMentionIdentity() && it.name.isCommentMentionIdentity() }) {
+            "Invalid official comment mention identity"
+        }
+        return formPost<CommentSubmitResponse, List<Int>>(
             path = "api/home/posts/comment",
             fields = listOf(
                 "content" to draft.contentHtml,
@@ -251,36 +388,130 @@ class OfficialForumApiService(
                 "root_parent" to draft.rootParentId.toString(),
                 "comment_pic" to draft.commentPictureText,
                 "tempsuid" to temporarySessionId,
-            ),
-        ).verified().data.orEmpty()
-
-    override suspend fun deleteComment(id: Int) {
-        jsonDelete<MutationResponse>(
-            path = "api/home/posts/deleteComment",
-            body = "{\"comment_id\":\"$id\"}".encodeToByteArray(),
-        ).verified()
+            ) + mentions.distinct().flatMapIndexed { index, mention ->
+                listOf(
+                    "atInfo[$index][uuid]" to mention.uuid,
+                    "atInfo[$index][character_name]" to mention.name,
+                )
+            },
+        ) { response ->
+            response.data?.takeIf { ids -> ids.isNotEmpty() && ids.all { it > 0 } }
+                ?: throw OfficialForumException.MissingPayload
+        }
     }
+
+    override suspend fun deleteComment(id: Int): Unit =
+        formDelete<MutationResponse, Unit>(
+            path = "api/home/posts/deleteComment",
+            body = "comment_id=$id".encodeToByteArray(),
+        ) { }
 
     override suspend fun submitVote(draft: OfficialForumVoteDraft): OfficialForumVoteResult {
         val options = draft.options.map { VoteSubmitOption(it.title, it.optionId) }
-        val response = formPost<VoteSubmitResponse>(
+        return formPost<VoteSubmitResponse, OfficialForumVoteResult>(
             path = "api/home/posts/vote",
             fields = listOf(
                 "posts_id" to draft.postId.toString(),
                 "options" to json.encodeToString(options),
                 "tempsuid" to temporarySessionId,
             ),
-        ).verified().data ?: throw OfficialForumException.MissingPayload
-        return OfficialForumVoteResult(
-            response.voteTotalUser.intValue ?: 0,
-            response.voteDetails.orEmpty().mapNotNull { detail ->
-                val id = detail.optionId.intValue ?: return@mapNotNull null
-                id to (detail.totalVoteNum.intValue ?: 0)
-            }.toMap(),
-        )
+        ) { response ->
+            val payload = response.data ?: throw OfficialForumException.MissingPayload
+            val total = (payload["voteTotalUser"] ?: payload["vote_total_user"])
+                .intValue?.takeIf { it >= 0 }
+                ?: throw OfficialForumException.MissingPayload
+            val rawDetails = (payload["voteDetails"] ?: payload["vote_details"]) as? JsonArray
+                ?: throw OfficialForumException.MissingPayload
+            val details = rawDetails.map { element ->
+                val detail = element as? JsonObject ?: throw OfficialForumException.MissingPayload
+                val optionId = detail["option_id"].intValue?.takeIf { it > 0 }
+                    ?: throw OfficialForumException.MissingPayload
+                val rawCount = detail["total_vote_num"]
+                val count = if (rawCount == null || rawCount is JsonNull) 0 else {
+                    rawCount.intValue?.takeIf { it >= 0 } ?: throw OfficialForumException.MissingPayload
+                }
+                optionId to count
+            }.toMap()
+            OfficialForumVoteResult(total, details)
+        }
+    }
+
+    private suspend fun requireMentionReadCapability() {
+        currentCoroutineContext().ensureActive()
+        if (!canReadMentionCandidates) throw OfficialForumException.AuthenticationRequired
+    }
+
+    private suspend fun recoverMentionAuthorizer(
+        identityConflict: Boolean,
+        attempt: Int,
+    ): RisingStonesRequestAuthorizer {
+        requireMentionReadCapability()
+        if (attempt != 0) {
+            if (identityConflict) throw OfficialForumException.IdentityConflict
+            throw OfficialForumException.AuthenticationRequired
+        }
+        val authorizer = if (identityConflict) {
+            identityConflictHandler?.awaitIdentityConflictResolution()
+        } else {
+            sessionProvider?.refreshAuthorizer()
+        }
+        requireMentionReadCapability()
+        return authorizer ?: if (identityConflict) throw OfficialForumException.IdentityConflict
+        else throw OfficialForumException.AuthenticationRequired
+    }
+
+    private suspend fun readMentionCandidates(): MutationResponse = normalizeFinalAuthenticationFailure {
+        val path = "api/home/userRelation/followList"
+        requireMentionReadCapability()
+        var authorizer = sessionProvider?.currentAuthorizer()
+        requireMentionReadCapability()
+        for (attempt in 0..1) {
+            val headers = authorizer.headers(
+                path,
+                RisingStonesAuthenticationRequirement.Required,
+                RisingStonesCapability.AccountRead,
+            )
+            requireMentionReadCapability()
+            if (headers.isEmpty()) throw OfficialForumException.AuthenticationRequired
+            val response = try {
+                client.execute(
+                    RisingStonesApiRequest(
+                        path,
+                        query = listOf(query("page", 1), query("limit", 5000)),
+                        headers = headers,
+                    ),
+                ).also {
+                    if (it.statusCode !in 200..299) {
+                        throw RisingStonesHttpException.ServerResponse(it.statusCode, it.body)
+                    }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                requireMentionReadCapability()
+                val identityConflict = error.isHttpIdentityConflict()
+                if (!identityConflict && !error.isHttpAuthenticationFailure()) throw error
+                authorizer = recoverMentionAuthorizer(identityConflict, attempt)
+                continue
+            }
+            requireMentionReadCapability()
+            val decoded = try {
+                json.decodeFromString<MutationResponse>(response.body.decodeToString())
+            } catch (_: SerializationException) {
+                throw OfficialForumException.MissingPayload
+            }
+            if (!decoded.isIdentityConflict() && !decoded.isAuthenticationFailure()) return decoded.verified()
+            authorizer = recoverMentionAuthorizer(decoded.isIdentityConflict(), attempt)
+        }
+        throw OfficialForumException.AuthenticationRequired
     }
 
     private suspend inline fun <reified T : ApiResponse> get(
+        path: String,
+        query: List<RisingStonesApiQueryItem>,
+    ): T = normalizeFinalAuthenticationFailure { getWithAuthentication<T>(path, query) }
+
+    private suspend inline fun <reified T : ApiResponse> getWithAuthentication(
         path: String,
         query: List<RisingStonesApiQueryItem>,
     ): T {
@@ -334,82 +565,17 @@ class OfficialForumApiService(
         return decoded
     }
 
-    private suspend inline fun <reified T : ApiResponse> formPost(
+    private suspend inline fun <reified T : ApiResponse, R> formPost(
         path: String,
         fields: List<Pair<String, String>>,
-    ): T {
-        val provider = sessionProvider
-            ?: throw OfficialForumException.AuthenticationRequired
-        if (RisingStonesCapability.ForumWrite !in provider.capabilities) {
-            throw OfficialForumException.AuthenticationRequired
-        }
-        val initialHeaders = provider.currentAuthorizer()
-            .headers(
-                path = path,
-                requirement = RisingStonesAuthenticationRequirement.Required,
-                capability = RisingStonesCapability.ForumWrite,
-            )
-            .takeIf(Map<String, String>::isNotEmpty)
-            ?: throw OfficialForumException.AuthenticationRequired
+        crossinline map: (T) -> R,
+    ): R {
         val body = fields.joinToString("&") { (name, value) ->
             "${name.formEncoded()}=${value.formEncoded()}"
         }.encodeToByteArray()
-        val response = try {
-            client.execute(formRequest(path, body, initialHeaders))
-        } catch (error: Exception) {
-            if (error.isHttpIdentityConflict()) {
-                val reclaimed = identityConflictHandler?.awaitIdentityConflictResolution()
-                    .headers(
-                        path,
-                        RisingStonesAuthenticationRequirement.Required,
-                        RisingStonesCapability.ForumWrite,
-                    )
-                    .takeIf(Map<String, String>::isNotEmpty)
-                    ?: throw error
-                return json.decodeFromString(
-                    client.execute(formRequest(path, body, reclaimed)).body.decodeToString(),
-                )
-            }
-            if (!error.isHttpAuthenticationFailure()) throw error
-            val refreshed = provider.refreshAuthorizer()
-                .headers(
-                    path,
-                    RisingStonesAuthenticationRequirement.Required,
-                    RisingStonesCapability.ForumWrite,
-                )
-                .takeIf(Map<String, String>::isNotEmpty)
-                ?: throw error
-            client.execute(formRequest(path, body, refreshed))
+        return authenticatedWrite(path, RisingStonesCapability.ForumWrite, map) { headers ->
+            formRequest(path, body, headers)
         }
-        var decoded = json.decodeFromString<T>(response.body.decodeToString())
-        if (decoded.isIdentityConflict()) {
-            identityConflictHandler?.awaitIdentityConflictResolution()
-                .headers(
-                    path,
-                    RisingStonesAuthenticationRequirement.Required,
-                    RisingStonesCapability.ForumWrite,
-                )
-                .takeIf(Map<String, String>::isNotEmpty)
-                ?.let { reclaimed ->
-                decoded = json.decodeFromString(
-                    client.execute(formRequest(path, body, reclaimed)).body.decodeToString(),
-                )
-            }
-        } else if (decoded.isAuthenticationFailure()) {
-            provider.refreshAuthorizer()
-                .headers(
-                    path,
-                    RisingStonesAuthenticationRequirement.Required,
-                    RisingStonesCapability.ForumWrite,
-                )
-                .takeIf(Map<String, String>::isNotEmpty)
-                ?.let { refreshed ->
-                decoded = json.decodeFromString(
-                    client.execute(formRequest(path, body, refreshed)).body.decodeToString(),
-                )
-            }
-        }
-        return decoded
     }
 
     private fun formRequest(
@@ -425,82 +591,92 @@ class OfficialForumApiService(
         contentType = "application/x-www-form-urlencoded; charset=utf-8",
     )
 
-    private suspend inline fun <reified T : ApiResponse> jsonDelete(
+    private suspend inline fun <reified T : ApiResponse, R> formDelete(
         path: String,
         body: ByteArray,
-    ): T {
-        val provider = sessionProvider
-            ?: throw OfficialForumException.AuthenticationRequired
-        if (RisingStonesCapability.ForumWrite !in provider.capabilities) {
-            throw OfficialForumException.AuthenticationRequired
-        }
-        val initialHeaders = provider.currentAuthorizer()
-            .headers(
-                path = path,
-                requirement = RisingStonesAuthenticationRequirement.Required,
-                capability = RisingStonesCapability.ForumWrite,
-            )
-            .takeIf(Map<String, String>::isNotEmpty)
-            ?: throw OfficialForumException.AuthenticationRequired
-        val response = try {
-            client.execute(jsonDeleteRequest(path, body, initialHeaders))
-        } catch (error: Exception) {
-            if (error.isHttpIdentityConflict()) {
-                val reclaimed = identityConflictHandler?.awaitIdentityConflictResolution()
-                    .headers(
-                        path,
-                        RisingStonesAuthenticationRequirement.Required,
-                        RisingStonesCapability.ForumWrite,
-                    )
-                    .takeIf(Map<String, String>::isNotEmpty)
-                    ?: throw error
-                return json.decodeFromString(
-                    client.execute(jsonDeleteRequest(path, body, reclaimed)).body.decodeToString(),
-                )
-            }
-            if (!error.isHttpAuthenticationFailure()) throw error
-            val refreshed = provider.refreshAuthorizer()
-                .headers(
-                    path,
-                    RisingStonesAuthenticationRequirement.Required,
-                    RisingStonesCapability.ForumWrite,
-                )
-                .takeIf(Map<String, String>::isNotEmpty)
-                ?: throw error
-            client.execute(jsonDeleteRequest(path, body, refreshed))
-        }
-        var decoded = json.decodeFromString<T>(response.body.decodeToString())
-        if (decoded.isIdentityConflict()) {
-            identityConflictHandler?.awaitIdentityConflictResolution()
-                .headers(
-                    path,
-                    RisingStonesAuthenticationRequirement.Required,
-                    RisingStonesCapability.ForumWrite,
-                )
-                .takeIf(Map<String, String>::isNotEmpty)
-                ?.let { reclaimed ->
-                decoded = json.decodeFromString(
-                    client.execute(jsonDeleteRequest(path, body, reclaimed)).body.decodeToString(),
-                )
-            }
-        } else if (decoded.isAuthenticationFailure()) {
-            provider.refreshAuthorizer()
-                .headers(
-                    path,
-                    RisingStonesAuthenticationRequirement.Required,
-                    RisingStonesCapability.ForumWrite,
-                )
-                .takeIf(Map<String, String>::isNotEmpty)
-                ?.let { refreshed ->
-                decoded = json.decodeFromString(
-                    client.execute(jsonDeleteRequest(path, body, refreshed)).body.decodeToString(),
-                )
-            }
-        }
-        return decoded
+        crossinline map: (T) -> R,
+    ): R = authenticatedWrite(path, RisingStonesCapability.ForumWrite, map) { headers ->
+        formDeleteRequest(path, body, headers)
     }
 
-    private fun jsonDeleteRequest(
+    private suspend inline fun <reified T : ApiResponse, R> authenticatedWrite(
+        path: String,
+        capability: RisingStonesCapability,
+        crossinline map: (T) -> R,
+        request: (Map<String, String>) -> RisingStonesApiRequest,
+    ): R {
+        val authorization = writeAuthorization(path, capability)
+        try {
+            val headers = authorization.authorizer.headers(
+                path,
+                RisingStonesAuthenticationRequirement.Required,
+                capability,
+            ).takeIf(Map<String, String>::isNotEmpty)
+                ?: throw OfficialForumException.AuthenticationRequired
+            val response = try {
+                client.execute(request(headers))
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (error.isHttpIdentityConflict()) throw OfficialForumException.IdentityConflict
+                if (error.isHttpAuthenticationFailure()) refreshAfterWriteAuthenticationFailure()
+                throw error
+            }
+            if (response.statusCode !in 200..299) {
+                if (response.statusCode in setOf(401, 403)) refreshAfterWriteAuthenticationFailure()
+                throw RisingStonesHttpException.ServerResponse(response.statusCode, response.body)
+            }
+            val decoded = try {
+                json.decodeFromString<T>(response.body.decodeToString())
+            } catch (_: SerializationException) {
+                throw OfficialForumException.MissingPayload
+            }
+            if (decoded.isAuthenticationFailure()) refreshAfterWriteAuthenticationFailure()
+            decoded.verified()
+            val result = map(decoded)
+            if (authorization.attempt?.complete() == false) {
+                throw OfficialForumException.AuthenticationRequired
+            }
+            return result
+        } finally {
+            authorization.attempt?.close()
+        }
+    }
+
+    private suspend fun writeAuthorization(
+        path: String,
+        capability: RisingStonesCapability,
+    ): ForumWriteAuthorization {
+        val provider = sessionProvider ?: throw OfficialForumException.AuthenticationRequired
+        val context = RisingStonesRequestContext(
+            path,
+            RisingStonesAuthenticationRequirement.Required,
+            capability,
+        )
+        if (provider is RisingStonesExplicitCapabilityProvider) {
+            val attempt = provider.beginCapabilityAttempt(context)
+                ?: throw OfficialForumException.AuthenticationRequired
+            return ForumWriteAuthorization(attempt.authorizer, attempt)
+        }
+        if (capability !in provider.capabilities) throw OfficialForumException.AuthenticationRequired
+        return ForumWriteAuthorization(
+            provider.currentAuthorizer() ?: throw OfficialForumException.AuthenticationRequired,
+            null,
+        )
+    }
+
+    private suspend fun refreshAfterWriteAuthenticationFailure(): Nothing {
+        try {
+            sessionProvider?.refreshAuthorizer()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            // Refresh only lets the provider revoke stale capabilities. Never retry this write.
+        }
+        throw OfficialForumException.AuthenticationRequired
+    }
+
+    private fun formDeleteRequest(
         path: String,
         body: ByteArray,
         headers: Map<String, String>,
@@ -510,19 +686,38 @@ class OfficialForumApiService(
         query = listOf(query("tempsuid", temporarySessionId)),
         headers = headers,
         body = body,
-        contentType = "application/json; charset=utf-8",
+        contentType = "application/x-www-form-urlencoded; charset=utf-8",
     )
 
     private fun <T : ApiResponse> T.verified(): T {
+        if (RisingStonesResponsePolicy.accepts(code)) return this
         if (code == 10105) throw OfficialForumException.IdentityConflict
-        if (code != 10000) throw OfficialForumException.Business(code, message)
-        return this
+        if (isAuthenticationFailure()) throw OfficialForumException.AuthenticationRequired
+        throw OfficialForumException.Business(code, message)
     }
 
     private companion object {
         val temporarySessionId: String = UUID.randomUUID().toString()
+        const val MaximumCommentImageBytes = 21 * 1024 * 1024
     }
 }
+
+private inline fun <T> normalizeFinalAuthenticationFailure(block: () -> T): T = try {
+    block()
+} catch (error: CancellationException) {
+    throw error
+} catch (error: Exception) {
+    if (!error.isHttpIdentityConflict() && error.isHttpAuthenticationFailure()) {
+        throw OfficialForumException.AuthenticationRequired
+    }
+    throw error
+}
+
+private fun safeObjectDirectory(value: String): Boolean = value.isNotBlank() &&
+    value.split('/').all { segment ->
+        segment.isNotEmpty() && segment != "." && segment != ".." &&
+            segment.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' || it in "._-" }
+    }
 
 private suspend fun RisingStonesRequestAuthorizer?.headers(
     path: String,
@@ -542,13 +737,19 @@ private fun query(name: String, value: Any) = RisingStonesApiQueryItem(name, val
 
 private fun String.formEncoded(): String = URLEncoder.encode(this, StandardCharsets.UTF_8.name())
 
+private fun JsonObject.mentionString(name: String): String? =
+    (get(name) as? JsonPrimitive)?.takeIf(JsonPrimitive::isString)?.contentOrNull
+
+private fun String.isCommentMentionIdentity(): Boolean = isNotBlank() &&
+    none { it == '#' || it.isISOControl() || it == '\u2028' || it == '\u2029' }
+
 private interface ApiResponse { val code: Int?; val message: String? }
 
 private fun ApiResponse.isIdentityConflict(): Boolean = code == 10105
 
 private fun ApiResponse.isAuthenticationFailure(): Boolean {
-    if (code == 10105) return false
-    if (code in setOf(401, 403, 10002, 10003, 10004, 10005)) return true
+    if (RisingStonesResponsePolicy.accepts(code) || code == 10105) return false
+    if (code in setOf(401, 403, 10003, 10004, 10005)) return true
     val normalized = message?.lowercase().orEmpty()
     return listOf(
         "未登录", "登录失效", "登录过期", "授权失效", "凭据失效", "token失效",
@@ -602,7 +803,7 @@ private data class PostListResponse(
 private data class PostDetailResponse(
     override val code: Int? = null,
     @SerialName("msg") override val message: String? = null,
-    val data: PostDetailDto? = null,
+    val data: JsonObject? = null,
 ) : ApiResponse
 
 @Serializable
@@ -667,52 +868,22 @@ internal object RisingStonesCos {
         secretKey: String,
         startTime: Long,
         expiredTime: Long,
-    ): String {
-        if (contentLength < 0 || secretId.isBlank() || secretKey.isBlank() || startTime >= expiredTime) {
-            throw OfficialForumException.ImageUploadFailed
-        }
-        val keyTime = "$startTime;$expiredTime"
-        val path = URI(url).rawPath ?: throw OfficialForumException.ImageUploadFailed
-        val httpString = "put\n$path\n\ncontent-length=$contentLength\n"
-        val stringToSign = "sha1\n$keyTime\n${sha1(httpString)}\n"
-        val signKey = hmacSha1(secretKey, keyTime)
-        val signature = hmacSha1(signKey, stringToSign)
-        return listOf(
-            "q-sign-algorithm=sha1", "q-ak=$secretId", "q-sign-time=$keyTime",
-            "q-key-time=$keyTime", "q-header-list=content-length", "q-url-param-list=",
-            "q-signature=$signature",
-        ).joinToString("&")
+    ): String = try {
+        top.cxmeow.risingstones.network.RisingStonesCosSigning.putAuthorization(
+            url, contentLength, secretId, secretKey, startTime, expiredTime,
+        )
+    } catch (_: IllegalArgumentException) {
+        throw OfficialForumException.ImageUploadFailed
     }
 
-    private fun sha1(value: String): String = MessageDigest.getInstance("SHA-1")
-        .digest(value.encodeToByteArray()).toHex()
-
-    private fun hmacSha1(key: String, value: String): String = Mac.getInstance("HmacSHA1").run {
-        init(SecretKeySpec(key.encodeToByteArray(), "HmacSHA1"))
-        doFinal(value.encodeToByteArray()).toHex()
-    }
-
-    private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
 }
 
 @Serializable
 private data class VoteSubmitResponse(
     override val code: Int? = null,
     @SerialName("msg") override val message: String? = null,
-    val data: VoteSubmitPayload? = null,
+    val data: JsonObject? = null,
 ) : ApiResponse
-
-@Serializable
-private data class VoteSubmitPayload(
-    @SerialName("vote_total_user") val voteTotalUser: JsonElement = JsonNull,
-    @SerialName("vote_details") val voteDetails: List<VoteDetailDto>? = null,
-)
-
-@Serializable
-private data class VoteDetailDto(
-    @SerialName("option_id") val optionId: JsonElement = JsonNull,
-    @SerialName("total_vote_num") val totalVoteNum: JsonElement = JsonNull,
-)
 
 @Serializable
 private data class VoteSubmitOption(
@@ -726,6 +897,7 @@ private data class PartDto(
     val name: String? = null,
     val status: JsonElement = JsonNull,
     val weight: JsonElement = JsonNull,
+    val children: List<PartDto> = emptyList(),
 ) {
     fun domain(): OfficialForumPartFilter? {
         if ((status.intValue ?: 1) != 1) return null
@@ -737,10 +909,15 @@ private data class PartDto(
     }
 }
 
+private fun List<PartDto>.categories(): List<OfficialForumCategory> = mapNotNull { dto ->
+    dto.domain()?.let { OfficialForumCategory(it, dto.children.categories()) }
+}.sortedWith(compareByDescending<OfficialForumCategory> { it.part.weight }.thenBy { it.part.id })
+
 @Serializable
 private data class PostListPayload(
     val count: JsonElement = JsonNull,
     val rows: List<PostRowDto> = emptyList(),
+    val pageTime: JsonElement = JsonNull,
 )
 
 private fun PostListPayload?.page(page: Int, limit: Int): OfficialForumPage<OfficialForumPostSummary> {
@@ -1019,6 +1196,9 @@ private val JsonElement?.intValue: Int?
         is JsonPrimitive -> intOrNull ?: contentOrNull?.toIntOrNull()
         else -> null
     }
+
+private val JsonElement?.stringValue: String?
+    get() = (this as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank)
 
 private val JsonElement?.optionalBoolean: Boolean?
     get() = intValue?.let { it == 1 }
