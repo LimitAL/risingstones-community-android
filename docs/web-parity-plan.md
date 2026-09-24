@@ -1,5 +1,181 @@
 # 官方移动站原生移植记录
 
+## 2026-09-22 搜索入口、分类与匿名边界独立核对
+
+本节只记录公开源码、独立匿名移动 Chrome 的入口核对及不带 Cookie 的只读响应形状；
+没有使用用户会话、提交写接口或保存个人结果。页面自动业务请求被拦截，另以合成关键词
+执行少量 GET，只提取 HTTP 状态、业务码、负载类型和字段名，不把空结果或路由配置当作能力。
+当前入口仍为 `app.22e9274d.js`，三个路由及相关结果组件的公开分块为：
+
+| 路由 | 分块与模块 | 当前入口及职责 |
+| --- | --- | --- |
+| `/searchm` | `chunk-19a7e138.e45ec487.js`，`7933` | 顶部导航 `onSearch()` 从社区、招募、我进入；幻化入口附 `section=glamour`，默认选幻化装备。匿名首页搜索图标实点可达，九类选择面板已核对 |
+| `/sresult` | `chunk-79c23077.5ebd8721.js`，`7487` | `/searchm.searchFun()` 和历史项 `histFun()` 进入；读取本地 `ffstonehist` 第一项作为搜索条件，不能把未消费的 route query 当作有效搜索参数。合成词表单到结果页导航已核对 |
+| `/search` | `chunk-46945544.7d7a06f8.js`，`4e22` | 独立用户搜索；好友页 `/mfriend` 的搜索图标 `gotoUrl("search")` 可达。好友页入口位于 `chunk-ee9ba2b4.a0f0879b.js` 的 `e0d1`；该来源页需登录，但 `/search` 路由本身 `auth=false` |
+| `/search/glamour/equipment` | `chunk-5e9e5e02.d7097b25.js`，`7a28` | 装备、面部配饰、时尚配饰候选选中后的幻化列表，不是另一种全站搜索类型 |
+
+三个搜索路由均为 `meta.auth=false`；只有 `/searchm` 设置 `keepAlive=true`。搜索历史由官网
+本地工具保存，按类型、关键词和两层板块 ID 去重，最多八项；清除历史不调用业务写接口。
+`searchm.getHotSearchList()` 虽保留 `GET api/common/getHotSearchList {type:2}`，但当前创建/
+挂载逻辑未调用，render 也没有热搜列表，不能据此记为当前可达热搜功能。
+
+`searchm.typeArr` 与 `sresult.typeArr` 一致，完整可选分类为以下九种，**没有动态、招募分类**：
+
+| 页面 type | 官方名称 | 实际只读接口与参数差异 | 页面响应解析 |
+| --- | --- | --- | --- |
+| 1 | 帖子标题 | `GET api/common/search`，`type=1` | `data.rows`，由 `Blist` 展示；`cover_pic` 按逗号生成 `arrpic` |
+| 2 | 帖子内容 | 同上，`type=2` | 同帖子标题 |
+| 3 | 攻略标题 | 同上，`type=3` | `data.rows`，由 `Glist` 展示 |
+| 4 | 攻略内容 | 同上，`type=4` | 同攻略标题 |
+| 6 | 用户 | 同上，`type=6`；输入提示为用户 UID 或角色名称 | `data` 直接为数组，不是 `data.rows`；由 `Guidpopitesearch` 展示 |
+| 7 | 幻化标题 | 同上，`type=7`；另合并幻化 `order` 与筛选参数 | `data.rows`；卡片用 `id/main_image`，点击 `/glamour/detail/:id` |
+| 8 | 幻化装备 | `GET api/home/gameData/searchEquip`，`name,page,limit=30,pageTime` | `data.rows`；候选使用 `id/name/icon_id/equip_slot_category` |
+| 9 | 面部配饰 | `GET api/home/gameData/getGlassesList`，仅 `name`；去掉名称中的 `（全部）` | `data` 分组数组，组有 `style_id/style_name/list`；先为每组加入所有子 ID 逗号串的“全部”候选，再展平 `list`，将 `icon` 映射为 `icon_id` |
+| 10 | 时尚配饰 | `GET api/home/gameData/getOrnamentList`，仅 `name` | `data.rows`；将 `icon` 映射为 `icon_id`，读取完成后结束分页 |
+
+公共搜索和热搜包装位于 `chunk-d603d9ac.54dd67f5.js` 的 `1925`，导出 `a/b`；游戏目录包装
+位于结果分块的 `646d`。`GetsearchFun()` 虽仍接受数字 5 并读取 `data`，当前分类数组和
+结果 render 都没有 5 的入口或对应卡片；不得猜测它是动态、招募或其他仍可用类型。
+
+论坛搜索的精确 query 来自 `sresult.queryParams`：
+`{type,keywords,part_id:parentThree_id||parentChd_id,orderBy}`，再合并
+`{page,limit,pageTime}`。默认 `orderBy=time`，只有 `time` 最新和 `comment` 最热两项；
+结果页默认每页 18。板块目录仍用 `posts/partList`：搜索 type 1/2 取目录 `type=1`，
+搜索 type 3/4 取目录 `type=2`。可选父板块及其 `children`，最终只传最深一层的单 ID；
+“全部”传空字符串，不把父子 ID 拼接。该规则与论坛多板块列表筛选分开。
+
+`GetsearchFun()` 对 type 1/2/3/4 只读取 `data.rows`，不消费 `count`；虽构造 `pageTime:t.time`，
+但 `endSuccess(rows.length)` 未接回响应游标。本次匿名 type 1/3 成功响应也只有 `data.rows`，
+没有 `count/pageTime`。因此原生可继续兼容可选游标和数量，但不能将缺少它们判为缺失负载或
+伪造总数；继续加载按已确认的行数判断。帖子和攻略卡片实际用 `posts_id` 打开 `tiedes`/
+`wikides`，消费标题、板块、作者、时间、评论数和封面，不能把 `common/search.type` 当作
+`postsList.type`。此外本页 catch 明确把业务码 `10003` 清空结果并结束滚动，其他错误调用
+`endErr()`；这只是该搜索端点的页面分支，本次请求没有遇到该码，不推导其他接口的通用语义。
+
+用户结果组件在 `chunk-d603d9ac.54dd67f5.js` 的 `ee0f`，读取
+`uuid,character_name,avatar,profile,area_name,group_name,admin_tag,badge,relation`。
+无 `uuid` 时显示“尚未注册社区”；原生后续实现必须保留这类结果，不将空 UUID 跳成当前本人
+主页。有效 UUID 才可交付已有社区作者阅读栈。组件虽包含关注按钮，但用户搜索成功不代表关注
+能力，本批仅核对读取，不执行关注。独立 `/search.GetlikeMyMsgFun()` 固定
+`{type:6,keywords,page,limit:100}`，没有板块、排序或游标字段，读取 `data` 数组。
+
+幻化标题搜索追加 `order=latest|hottest`，以及可选 `race_id,tribe_id,gender_id,createTime,tag_ids`；
+`createTime` 沿用已确认的 `last24H/lastWeek/lastMonth`，不发送“全部”值。选中 type 8 候选时
+跳装备结果页并传 `id`；type 9/10 另传 `name,type`。后续统一请求 `common/search` 的
+`type=7,keywords=<候选ID或ID逗号串>,page,limit=12,order` 加筛选，并分别仅设置
+`searchByEquipment=1`、`searchByGlasses=1`、`searchByOrnament=1`。装备分支还读取
+`gameData/getEquipById?equip_id=...` 的 `data[0]` 作标题；两种配饰使用路由传入名称。
+候选种类 8/9/10 不能直接作为后续幻化作品搜索的 `type`。
+
+本次匿名形状核对与源码鉴权分开记录：
+
+| 请求类别 | 不带 Cookie 的结果 | 证据边界 |
+| --- | --- | --- |
+| `common/search` type 1、3 | HTTP 200 / 10000，`data.rows` 数组 | 未输出行内容；未出现 `count/pageTime` |
+| `common/search` type 6 | HTTP 200 / 10000，`data=[]` | 证明接受匿名空结果，不证明所有用户结果或个人主页匿名可读 |
+| `common/search` type 7 | HTTP 200 / 10000，`data.rows=[]`、字符串 `count` | 幻化标题搜索可匿名返回；不替代幻化详情、个人收藏等门禁 |
+| `common/search` type 2、4 | 传输超时 | 不将超时分类为鉴权拒绝，也不推断接口不可用 |
+| 三个游戏物品候选目录 | HTTP 200 / 10403 | 搜索路由允许匿名进入，不代表候选目录匿名可读；失败负载不能作为成功空结果 |
+
+原生范围与最小切片：
+
+1. 现有 `forum-domain/OfficialForumContentKind` 的列表值为 Post=1、Guide=2；审计发现旧
+   `forum-data/OfficialForumApiService.searchBrowsePage()` 直接复用该值，导致攻略搜索发送
+   帖子内容 type 2。已修正旧帖子/攻略搜索分别默认标题 type 1/3，新增可选标题／正文搜索
+   契约覆盖 1/2/3/4，保留旧查询构造器和服务方法。搜索限定的 10003 分支返回空页且不刷新
+   授权，不修改其他端点的既有错误分类。原生字段选择、分页快照与迟到结果隔离已接入；
+   设计及验证范围见[论坛搜索设计](forum-search-design.md)和[兼容记录](compatibility-matrix.md)。
+2. `glamour-domain/GlamourSearchSelection`、`glamour-data/GlamourApiService` 已有标题与三种
+   物品候选到作品列表能力；这些分类不能再次计为全新功能。其当前统一要求
+   `GlamourAuthenticated`，与上述公开搜索页的匿名标题结果存在范围差异；若后续开放匿名标题
+   搜索，应独立设计只读入口，不顺带放开受保护目录或修改已有能力语义。
+3. 用户 UID/角色名称搜索尚无原生领域服务和入口；最小后续切片可在 `profile-*` 增加可选的
+   只读搜索服务、独立列表状态与原生入口，有效 UUID 复用现有作者阅读层，不自动读取粉丝提醒、
+   不自动关注、不把无社区身份结果伪装为本人。紧凑宽度列表到主页，中等/展开保持列表状态；
+   需要验证取消、换查询、分页、失败保留及返回/重建不重复请求。
+4. 官网本地搜索历史与分类总入口属于待统一的信息结构；当前未发现可纳入本批的动态、招募
+   全站搜索入口。已有设备和真实只读证据仍保留；本节匿名读取及源码核对不构成新的原生设备
+   验证或真实账号写入验证。
+
+## 2026-09-22 五类招募转发与其他来源边界
+
+匿名本机无头移动 Chrome 只读取官方公开资产，阻止业务 API 与非 GET 请求。
+五类招募详情的 `shareActions` 均含“分享至动态”，选中后展示 `showScope`，由
+`dynamicCreate(scope)` 调用 POST `api/home/recruit/relay`；表单仅有 `from`、`scope`、
+`recruid_id`（保持官网拼写），没有正文、提及或图片编辑步骤。范围为 1 公开、2 仅互关、
+3 仅自己；成功只提示，不消费响应 data，也无自动进入新动态详情的证据。
+
+| 招募来源 | from | 官方详情分块 |
+| --- | --- | --- |
+| 新人 | 5 | `chunk-538f133e.e9386126.js`，模块 `74cf` |
+| 副本 | 6 | `chunk-d4ffb3ca.c9f5a9ea.js`，模块 `728e` |
+| 部队 | 7 | `chunk-168483a7.6a05c066.js`，模块 `2f12` |
+| RP | 8 | `chunk-82a39a60.2806051b.js`，模块 `8836` |
+| 其他 | 9 | `chunk-18822b50.0706a281.js`，模块 `e07e` |
+
+接口包装在 `app.22e9274d.js` 模块 `5a1a` 的 `db`，共享 `b775` 将 POST 数据序列化为
+表单。招募动态来源卡由 commons `cdca` 的 Dlist 交给 `b3fb` 的 Recruitcard，使用
+`from_info.id` 打开对应类型详情；结束或下架状态可能禁止打开。原生已用独立
+`DynamicRecruitmentRelayService` 和 `DynamicRecruitmentRelayDraft` 实现五类转发，精确保留
+`recruid_id`，不能经由帖子转发的 `posts_id` 提交。它复用 `DynamicWrite`，成功不假定响应包含
+新动态 ID；真实账号写入仍未验证。
+
+招募详情通过 `RisingStonesRecruitmentRelayNavigation` 向宿主交付已读取的 ID、板块和标题，
+宿主将五类板块映射为对应 `DynamicOrigin` 后显示 `RisingStonesDynamicRecruitmentRelayScreen`。
+确认页只选择公开、仅互关或仅自己，没有正文、提及、图片或上传。部队来源仍要求招募读取身份
+有效；动态读取或动态写入资格不能替代该门禁。成功时先请求宿主刷新动态，再返回原招募详情，
+导航只弹出确认页一次。
+
+幻化投稿当前分块为 `chunk-f396bf32.5c71c4e8.js`，模块 `0895`；旧 `eccff9bf` 已返回 404。
+“公开分享到动态”默认关闭，`createPublishParams` 传 `is_share="1"/"0"` 与固定 `scope="1"`，
+随完整表单提交至 `glamour/createGlamour` 或 `glamour/updateGlamour`。编辑另传 `id` 与
+`updated_at`。详情分块 `chunk-78f68c56.3e50ce4c.js` 的 `a7a9` 只提供生成分享图；不能把
+修改整个投稿包装为任意作品的独立转发。编辑时勾选的重复同步规则仍需后续证据。
+
+动态列表 `chunk-commons.01300528.js` 的 `cdca` 和详情 `chunk-66537460.ead179a5.js` 的
+`1d6b` 未发现再次转发入口。`from=4` 的残留跳转分支不足以证明存在写接口；当前不开放。
+幻化同步仍应随投稿流程实现；五类招募转发已经按上述独立契约接入，动态再次转发继续保留
+未发现入口和写契约的边界。实现设计见[招募分享到动态设计](recruitment-relay-design.md)。
+
+## 2026-09-22 动态发布与帖子/攻略转发
+
+移动模式加载官方发布分块 `chunk-2693dc42.a0ac27d8.js`、转发分块
+`chunk-4420b4e8.33afac25.js` 及公共编辑依赖 `chunk-4a5f46a6.4f6a85f9.js`，确认动态发布为
+POST `api/home/dynamic/create`，字段为 `atInfo[index][uuid/character_name]`、`content`、
+`scope` 和按最终顺序逗号连接的 `pic_url`。帖子与攻略转发为 POST `api/home/posts/relay`，
+只发送同样的提及、正文和范围字段以及 `posts_id`；空正文使用“分享了内容：”，不发送图片或
+`type`。两者以 HTTP 200 和业务码 10000/10002 为成功，不依赖返回动态 ID。
+
+原生在现有 `dynamic-*` 模块中增加发布可见范围、草稿、发布服务、发布图片上传服务和状态机。
+发布页支持 1 公开、2 仅互关、3 仅自己，正文必填、最多九图、排序和移除、官方表情、关注对象
+提及、退出确认、失败保留及明确重试；转发页保留来源标题，不开放图片。发布图片令牌使用
+`getCOSTokenI?channel=dynamic`，评论仍使用 `channel=default`；不透明结果同时绑定凭证作用域
+和用途，不能跨账号、跨草稿或在评论与发布之间混用。选图、预览和排序本身不触发上传。
+
+帖子转发页面的证据只覆盖帖子与攻略。其他动态来源的阅读类型不能直接传给该接口；招募已经
+通过独立 `recruit/relay` 契约接入，动态再次转发与幻化同步仍保留各自边界。公开脚本和合成夹具
+不构成真实账号写入证据；本批没有提交、上传、改变可见范围或转发真实内容，设备与全量验证
+待本轮汇总。
+完整设计见[动态发布与帖子转发设计](dynamic-publishing-design.md)。
+
+## 2026-09-22 动态互动契约核对
+
+本机无头 Chrome 移动模式成功加载当前官方 SPA，入口和公共分块仍为 `app.22e9274d.js`
+与 `chunk-commons.01300528.js`；进一步读取详情分块 `chunk-66537460.ead179a5.js`。
+核对正文点赞、评论、回复和删除的真实调用，设计见[动态互动设计](dynamic-actions-design.md)。
+
+动态详情对根评论及楼中楼都明确设置 `iszan=false`，共享组件对应点赞元素因此不渲染。
+虽然公共组件包含 `posts/like {id,type:2}`，它不证明动态评论支持该接口；原生不调用该接口
+为动态评论点赞，避免混用评论 ID。动态正文使用 `dynamic/like {id}`，其返回正负一判定状态。
+
+详情 GET 使用 `id`，顶层评论使用 `id,page,limit,pageTime`；代码中的 `orderType` 未定义，
+不为其猜测排序参数。回复使用 `root_parent,order=earliest,page,limit`。评论 `comment_pic`
+为单个 URL，根/子回复分别保留直接父 ID 与根 ID；两个删除接口都使用 DELETE 表单 body。
+身份仅通过已核对的当前社区 UUID 与官方响应作者比较，不将角色或帖子 ID 当作社区身份。
+
+本轮只读取公开网页与脚本，未以真实账号执行点赞、评论、上传或删除。手动登录确认与写能力
+验证分别记录；合成接口及设备测试不构成真实写入证据。
+
 ## 2026-09-20 论坛与招募首次互动设计
 
 1. 范围仅为已核对的官方论坛点赞、收藏、评论、删除、投票、评论图片上传，以及副本/新人
@@ -59,13 +235,13 @@
 
 | 官方页面或区域 | 已有原生能力 | 仍需补齐或核验 |
 | --- | --- | --- |
-| 社区首页：帖子、动态、攻略 | 帖子和攻略列表、搜索、正文、评论；新增筛选、攻略分类、游标与动态读取 | 动态写入、转发 |
-| 招募：副本、新人、部队、跑团、其他 | 列表、详情、目录、跑团成员及评论 | 发布与管理、跑团活动、成员详情、已回应记录 |
-| 幻化及作者页 | 社区及关注列表、条件与物品筛选、游标、本人和作者作品、详情、收藏夹管理及优惠券入口 | 新增写操作的真实账号验证、发布与编辑、造型师与积分记录 |
+| 社区首页：帖子、动态、攻略 | 帖子和攻略列表、搜索、正文、评论；筛选、攻略分类、游标与动态读取；动态发布及帖子/攻略转发已实现 | 真实发布/转发验证；动态再次转发 |
+| 招募：副本、新人、部队、跑团、其他 | 列表、详情、目录、跑团成员及评论；五类招募分享到动态 | 转发真实写入验证；发布与管理、跑团活动、成员详情、已回应记录 |
+| 幻化及作者页 | 社区及关注列表、条件与物品筛选、游标、本人和作者作品、详情、收藏夹管理及优惠券入口 | 新增写操作的真实账号验证、发布与编辑及随投稿同步、造型师与积分记录 |
 | 我及个人主页 | 账号摘要、签到、会话管理、资料与隐私过滤、帖子和动态历史、收藏及关系 | 徽章、近期成就、个人设置及更多个人招募与幻化入口 |
 | 消息 | 系统、提及、评论、点赞、招募消息和已回应记录 | 部队相册来源、系统外部活动链接分类及真实 Android 鉴权回归 |
 | 数据中心 | 已有数据看板及部分详情；新增蜃景、朝圣交错路及历史读取 | 绝本、零式、钓鱼、幻化目录与展示补全；探索武器阶段与分享 |
-| 发布及举报、申诉 | 部分服务契约 | 需要独立设计、精确请求契约和明确用户操作，不能用于探测 |
+| 发布及举报、申诉 | 动态发布、帖子/攻略及五类招募转发已按各自精确契约接入；其余仅有部分服务契约 | 其他发布、举报和申诉需要独立设计及明确用户操作，不能用于探测 |
 
 官网存在入口不等于当前账号可用，也不等于现有客户端已完成移植。
 

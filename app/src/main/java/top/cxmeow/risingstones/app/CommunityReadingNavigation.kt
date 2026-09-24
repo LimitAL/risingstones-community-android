@@ -5,6 +5,9 @@ import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import top.cxmeow.risingstones.core.auth.RisingStonesCapability
+import top.cxmeow.risingstones.core.auth.RisingStonesSessionState
+import top.cxmeow.risingstones.core.auth.supports
 import top.cxmeow.risingstones.feature.dynamic.domain.DynamicOrigin
 import top.cxmeow.risingstones.feature.dynamic.domain.DynamicReference
 import top.cxmeow.risingstones.feature.message.domain.*
@@ -15,11 +18,38 @@ internal sealed interface CommunityDestination {
     data class Profile(val owner: ProfileOwner) : CommunityDestination
     data class Post(val id: Int) : CommunityDestination
     data class Dynamic(val id: Int) : CommunityDestination
+    data class DynamicComposer(
+        val relayPostId: Int? = null,
+        val relayPostTitle: String? = null,
+    ) : CommunityDestination {
+        init {
+            require(relayPostId == null || relayPostId > 0)
+            require(relayPostId != null || relayPostTitle == null)
+        }
+    }
+    data class DynamicRecruitmentRelay(
+        val id: Int,
+        val origin: DynamicOrigin,
+        val title: String,
+    ) : CommunityDestination {
+        init {
+            require(id > 0)
+            require(origin.isRecruitmentRelayOrigin())
+        }
+    }
     data class Glamour(val id: Int) : CommunityDestination
     data class Recruitment(val id: Int, val board: RecruitmentBoardKind) : CommunityDestination
     data object Guild : CommunityDestination
     data class GuildPhoto(val id: Int) : CommunityDestination
 }
+
+internal fun communityReadingAccess(state: RisingStonesSessionState) = CommunityReadingAccess(
+    profile = state.supports(RisingStonesCapability.AccountRead),
+    dynamic = state.supports(RisingStonesCapability.DynamicRead),
+    glamour = state.supports(RisingStonesCapability.GlamourAuthenticated),
+    guildRecruitment = state.supports(RisingStonesCapability.RecruitmentAuthenticated),
+    guild = state.supports(RisingStonesCapability.GuildRead),
+)
 
 internal data class CommunityReadingAccess(
     val profile: Boolean = false,
@@ -33,12 +63,33 @@ internal data class CommunityReadingAccess(
             destination.owner.uuid.isNotBlank())
         is CommunityDestination.Post -> destination.id > 0
         is CommunityDestination.Dynamic -> dynamic && destination.id > 0
+        is CommunityDestination.DynamicComposer -> dynamic
+        is CommunityDestination.DynamicRecruitmentRelay -> dynamic &&
+            (destination.origin != DynamicOrigin.GuildRecruitment || guildRecruitment)
         is CommunityDestination.Glamour -> glamour && destination.id > 0
         is CommunityDestination.Recruitment -> destination.id > 0 &&
             (destination.board != RecruitmentBoardKind.Guild || guildRecruitment)
         CommunityDestination.Guild -> guild
         is CommunityDestination.GuildPhoto -> guild && destination.id > 0
     }
+}
+
+internal fun RecruitmentBoardKind.dynamicOrigin(): DynamicOrigin = when (this) {
+    RecruitmentBoardKind.Duty -> DynamicOrigin.DutyRecruitment
+    RecruitmentBoardKind.Beginner -> DynamicOrigin.BeginnerRecruitment
+    RecruitmentBoardKind.Guild -> DynamicOrigin.GuildRecruitment
+    RecruitmentBoardKind.Other -> DynamicOrigin.OtherRecruitment
+    RecruitmentBoardKind.RolePlay -> DynamicOrigin.RolePlayRecruitment
+}
+
+private fun DynamicOrigin.isRecruitmentRelayOrigin(): Boolean = when (this) {
+    DynamicOrigin.BeginnerRecruitment,
+    DynamicOrigin.DutyRecruitment,
+    DynamicOrigin.GuildRecruitment,
+    DynamicOrigin.RolePlayRecruitment,
+    DynamicOrigin.OtherRecruitment,
+    -> true
+    else -> false
 }
 
 /** Stores live reading destinations only; identity and content are not written into saved state. */

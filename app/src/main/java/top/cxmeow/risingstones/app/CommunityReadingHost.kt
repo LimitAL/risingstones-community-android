@@ -23,6 +23,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import top.cxmeow.risingstones.feature.dynamic.domain.DynamicService
+import top.cxmeow.risingstones.feature.dynamic.domain.DynamicActionService
+import top.cxmeow.risingstones.feature.dynamic.domain.DynamicImageUploadService
+import top.cxmeow.risingstones.feature.dynamic.domain.DynamicPublishingService
+import top.cxmeow.risingstones.feature.dynamic.domain.DynamicRecruitmentRelayService
 import top.cxmeow.risingstones.feature.dynamic.presentation.DynamicViewModel
 import top.cxmeow.risingstones.feature.dynamic.ui.compose.*
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumService
@@ -36,6 +40,7 @@ import top.cxmeow.risingstones.feature.profile.domain.ProfileService
 import top.cxmeow.risingstones.feature.profile.presentation.ProfileViewModel
 import top.cxmeow.risingstones.feature.profile.ui.compose.RisingStonesProfileScreen
 import top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentService
+import top.cxmeow.risingstones.feature.recruitment.presentation.RecruitmentBoardKind
 import top.cxmeow.risingstones.feature.recruitment.ui.compose.*
 import top.cxmeow.risingstones.feature.guild.domain.GuildService
 import top.cxmeow.risingstones.feature.guild.domain.GuildActionService
@@ -51,6 +56,9 @@ internal class CommunityReadingServices(
     val guild: GuildService,
     val guildActions: GuildActionService? = guild as? GuildActionService,
     val guildImages: GuildImageUploadService? = null,
+    val dynamicActions: DynamicActionService? = dynamic as? DynamicActionService,
+    val dynamicImages: DynamicImageUploadService? = null,
+    val onDynamicPublished: (() -> Unit)? = null,
 )
 
 @Composable
@@ -61,6 +69,26 @@ internal fun CommunityReadingHost(
     content: @Composable () -> Unit,
 ) {
     val author: ((String) -> Unit)? = if (access.profile) navigation::openAuthor else null
+    val canPublishDynamic = canOpenDynamicPublishing(access.dynamic, services.dynamic, services.dynamicActions)
+    val openDynamicComposer: (() -> Unit)? = if (canPublishDynamic) {
+        { navigation.open(CommunityDestination.DynamicComposer()) }
+    } else null
+    val relayForumPost: ((Int, String) -> Unit)? = if (canPublishDynamic) {
+        { postId, postTitle ->
+            navigation.open(CommunityDestination.DynamicComposer(postId, postTitle))
+        }
+    } else null
+    val canRelayRecruitment = canOpenDynamicRecruitmentRelay(
+        access.dynamic,
+        services.dynamic,
+        services.dynamicActions,
+    )
+    val relayRecruitment: ((Int, RecruitmentBoardKind, String) -> Unit)? = if (canRelayRecruitment) {
+        { id, board, title ->
+            val destination = CommunityDestination.DynamicRecruitmentRelay(id, board.dynamicOrigin(), title)
+            if (access.allows(destination)) navigation.open(destination)
+        }
+    } else null
     RisingStonesGuildAuthorNavigation(author) {
         RisingStonesForumAuthorNavigation(author) {
             RisingStonesDynamicAuthorNavigation(author) {
@@ -72,8 +100,16 @@ internal fun CommunityReadingHost(
                                 is MessageAuthorTarget.Community -> navigation.openAuthor(target.uuid)
                             }
                         } else null) {
-                            CommunityReadingStack(navigation, content) { entry ->
-                                CommunityDestinationScreen(entry.destination, navigation, access, services)
+                            RisingStonesDynamicActionProvider(services.dynamicActions, services.dynamicImages) {
+                                RisingStonesDynamicPublishingNavigation(openDynamicComposer) {
+                                    RisingStonesForumRelayNavigation(relayForumPost) {
+                                        RisingStonesRecruitmentRelayNavigation(relayRecruitment) {
+                                            CommunityReadingStack(navigation, content) { entry ->
+                                                CommunityDestinationScreen(entry.destination, navigation, access, services)
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -82,6 +118,22 @@ internal fun CommunityReadingHost(
         }
     }
 }
+
+internal fun canOpenDynamicPublishing(
+    hasDynamicAccess: Boolean,
+    dynamic: DynamicService,
+    actions: DynamicActionService?,
+): Boolean = hasDynamicAccess && dynamic is DynamicPublishingService && actions?.let {
+    it.canPerformAuthenticatedWrites || it.canAttemptAuthenticatedWrites
+} == true
+
+internal fun canOpenDynamicRecruitmentRelay(
+    hasDynamicAccess: Boolean,
+    dynamic: DynamicService,
+    actions: DynamicActionService?,
+): Boolean = hasDynamicAccess && dynamic is DynamicRecruitmentRelayService && actions?.let {
+    it.canPerformAuthenticatedWrites || it.canAttemptAuthenticatedWrites
+} == true
 
 /** Keeps covered pages composed, but unplaced and stopped, so only the top page handles input/back. */
 @Composable
@@ -188,6 +240,43 @@ private fun CommunityDestinationScreen(destination: CommunityDestination, naviga
             RisingStonesDynamicDetailScreen(model, navigation::back,
                 canOpenReference = { it.destination()?.let(access::allows) == true },
                 onOpenReference = { it.destination()?.let(navigation::open) })
+        }
+        is CommunityDestination.DynamicComposer -> {
+            val actionService = services.dynamicActions
+            val publishingService = services.dynamic as? DynamicPublishingService
+            if (canOpenDynamicPublishing(access.dynamic, services.dynamic, actionService) &&
+                actionService != null && publishingService != null) {
+                RisingStonesDynamicPublishingScreen(
+                    actionService = actionService,
+                    publishingService = publishingService,
+                    imageUploadService = services.dynamicImages,
+                    relayPostId = destination.relayPostId,
+                    relayPostTitle = destination.relayPostTitle,
+                    onNavigateBack = navigation::back,
+                    onPublished = { services.onDynamicPublished?.invoke() },
+                )
+            } else {
+                LaunchedEffect(destination) { navigation.back() }
+            }
+        }
+        is CommunityDestination.DynamicRecruitmentRelay -> {
+            val actionService = services.dynamicActions
+            val relayService = services.dynamic as? DynamicRecruitmentRelayService
+            if (access.allows(destination) &&
+                canOpenDynamicRecruitmentRelay(access.dynamic, services.dynamic, actionService) &&
+                actionService != null && relayService != null) {
+                RisingStonesDynamicRecruitmentRelayScreen(
+                    actionService = actionService,
+                    relayService = relayService,
+                    recruitmentId = destination.id,
+                    origin = destination.origin,
+                    sourceTitle = destination.title,
+                    onNavigateBack = navigation::back,
+                    onPublished = { services.onDynamicPublished?.invoke() },
+                )
+            } else {
+                LaunchedEffect(destination) { navigation.back() }
+            }
         }
     }
 }

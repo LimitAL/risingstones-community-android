@@ -200,7 +200,19 @@ UI 制品已经加入公共 API 消费检查，宿主不必同时依赖 data 模
 `OfficialForumApiService` 同时实现可选的 `OfficialForumBrowsingService`。新接入方通过
 `fetchCategories(kind)` 获取包含子分类的目录，通过 `fetchBrowsePage` 选择最新发布、精华
 或置顶，并将返回的 `pageTime` 原样传入下一页。刷新或改变分类、搜索条件时清空游标。
-搜索使用 `searchBrowsePage`，也遵循同一游标规则。
+搜索使用 `searchBrowsePage`，响应存在游标时遵循同一规则；当前匿名成功响应可以只有
+`rows`，不能要求总数或游标字段。
+
+官方实现另提供可选 `OfficialForumTextSearchService.searchTextPage(query, field, pageTime)`，
+其中 `OfficialForumSearchField.Title` 和 `Body` 表示标题、正文。旧 `searchPosts` 与
+`searchBrowsePage` 默认标题搜索，原查询和服务签名保持不变。搜索端点的四种类型为帖子
+标题 1、帖子正文 2、攻略标题 3、攻略正文 4，与列表的帖子 1、攻略 2 不同。
+该端点的业务码 10003 按官方页面处理为空结果，不修改其他接口的认证策略。
+
+`OfficialForumListViewModel.searchState` 单独暴露扩展可用性和字段；用 `setSearchField`
+选择，再 `submitSearch()` 提交首个查询。已有搜索切换字段时重读第一页并清除旧选择及游标；
+分页绑定已提交的字段和关键词，尚未提交的新输入不会混入后续页。旧服务不显示正文选择。
+旋转和宽度变化保留同一 ViewModel，切换帖子／攻略时按现有规则清空关键词并恢复标题模式。
 
 既有 `OfficialForumService`、`OfficialForumListQuery`、`OfficialForumPage` 和分类模型的
 签名保持不变；原有实现仍可接入。默认 ViewModel 自动识别扩展契约，并从独立的
@@ -271,6 +283,109 @@ ViewModelStore。独立应用会同步重建仍显示的论坛页面，防止复
 保留现有会话以便重试，协程取消继续传播。独立应用的会话恢复由 ViewModel 管理，每次
 运行时只恢复一次，避免旋转重复校验并清空界面。
 
+
+## 动态明确互动与发布
+
+`DynamicApiService` 同时实现可选的 `DynamicActionService`、`DynamicPublishingService` 和
+`DynamicRecruitmentRelayService`；原 `DynamicService`、读取实体和屏幕参数保留。
+`DynamicImageUploadApiService` 同时实现
+`DynamicImageUploadService` 与 `DynamicPublishingImageUploadService`，不需要引入其他功能模块。
+
+```kotlin
+val dynamic = DynamicApiService(publicApiClient, sessionProvider)
+val images = DynamicImageUploadApiService(publicApiClient, sessionProvider)
+RisingStonesDynamicActionProvider(dynamic, images) {
+    RisingStonesDynamicPublishingNavigation(onCreate = ::openDynamicComposer) {
+        RisingStonesForumRelayNavigation(onRelay = ::openDynamicRelayComposer) {
+            RisingStonesRecruitmentRelayNavigation(onRelay = ::openRecruitmentRelayConfirmation) {
+                RisingStonesDynamicScreen(dynamicViewModel, onNavigateBack = onBack)
+            }
+        }
+    }
+}
+```
+
+`RisingStonesDynamicPublishingNavigation` 向动态列表提供新建入口；
+`RisingStonesForumRelayNavigation` 的回调接收已读取的正整数 `postId` 与标题，帖子和攻略详情
+复用该入口。宿主在独立目的地中显示编辑器：
+
+```kotlin
+RisingStonesDynamicPublishingScreen(
+    actionService = dynamic,
+    publishingService = dynamic,
+    imageUploadService = images,
+    relayPostId = postIdOrNull,
+    relayPostTitle = postTitleOrNull,
+    onNavigateBack = onBack,
+    onPublished = ::refreshDynamicFeed,
+)
+```
+
+`relayPostId == null` 表示发布动态；非空时只表示已确认的帖子或攻略来源。其他动态来源、招募和
+幻化不能传入此参数。成功响应不保证包含新动态 ID，因此 `onPublished` 只用于列表刷新，
+不能据此构造详情路由；刷新失败也不能重新发送已成功的写请求。屏幕先调用 `onPublished`，
+再调用 `onNavigateBack`；不要在 `onPublished` 再次返回，否则会移除两层目的地。
+
+`RisingStonesRecruitmentRelayNavigation` 的回调接收已读取的招募 ID、`RecruitmentBoardKind` 和
+标题。宿主把五类板块映射为 `DynamicOrigin.BeginnerRecruitment`、`DutyRecruitment`、
+`GuildRecruitment`、`RolePlayRecruitment` 或 `OtherRecruitment`，再显示独立确认页：
+
+```kotlin
+RisingStonesDynamicRecruitmentRelayScreen(
+    actionService = dynamic,
+    relayService = dynamic,
+    recruitmentId = recruitmentId,
+    origin = origin,
+    sourceTitle = sourceTitle,
+    onNavigateBack = onBack,
+    onPublished = ::refreshDynamicFeed,
+)
+```
+
+入口要求动态读取可用、`DynamicActionService` 允许明确尝试或已有 `DynamicWrite`，且 data 服务
+实现 `DynamicRecruitmentRelayService`。`GuildRecruitment` 还必须保留招募模块已有的部队身份
+读取门禁，不能只凭动态能力开放。确认页只有三档 `DynamicVisibility`，没有正文、提及、图片或
+上传；自定义调用使用 `DynamicRecruitmentRelayDraft(recruitmentId, origin, visibility)`。
+data 精确发送 `from`、`scope`、`recruid_id`，不得修正官网字段拼写或附加帖子字段。
+
+服务成功只证明该 `DynamicWrite` 尝试完成，不返回可依赖的新动态 ID。确认页先调用
+`onPublished` 请求宿主刷新动态，再调用一次 `onNavigateBack` 返回原招募详情；刷新回调不要执行
+导航返回，宿主也不要在成功后再次弹栈。失败保留范围供用户明确重试，写请求不会自动重发。
+
+`canAttemptAuthenticatedWrites` 表示当前 `DynamicRead` 会话允许用户明确开始操作；
+`canPerformAuthenticatedWrites` 仅表示当前凭证已成功完成过 `DynamicWrite` 操作。
+上传独立授予 `DynamicImageUpload`。二者都不能通过自动点赞、评论或上传来探测。
+
+自定义界面应在资源打开时 `beginActionScope()`，将同一作用域用于资格读取、草稿、图片和
+最终提交，结束时关闭。动态删除资格由作用域内官方详情作者和当前社区 UUID 比较得出。
+评论须先通过带作用域的 `fetchComments` / `fetchReplies` 读取，`commentEligibility`
+对未观察的评论返回未知；不得根据调用方自行提供的作者字符串展示删除权限。
+
+正文点赞返回 `DynamicLikeResult`；评论输入为 `DynamicCommentDraft`，正文为官方 HTML，
+提及使用 `DynamicCommentMention`。根评论两个父 ID 为 0，回复根评论两个父 ID 相同，
+回复子评论使用子 ID 和所属根 ID。单图上传只接受本地选择的 `DynamicImageUploadInput`，
+返回不透明结果，仅同一作用域可用于后续提交。上传成功而评论失败时可在用户明确重试时复用。
+
+自定义发布界面使用 `DynamicPublishDraft`；正文不能为空，`DynamicVisibility` 映射公开、仅互关
+和仅自己，图片最多九张且列表顺序就是 `pic_url` 顺序。每张图片在用户明确提交时调用
+`DynamicPublishingImageUploadService.uploadPublishingImage()`，返回结果只能用于同一作用域的
+发布，不能传给评论。输入沿用 `DynamicImageUploadInput`，支持 png、jpeg、jpg、gif、webp，
+单图最多 22,020,096 字节。帖子/攻略转发使用 `DynamicPostRelayDraft`，允许空正文并由 data 层
+替换为官网默认文字，不接受图片。两个提交都通过 `DynamicPublishingService` 完成。
+使用 `DynamicPublishingViewModel` 时，通过 `DynamicPublishingImageSource` 延迟读取本地图片；
+状态仅保留来源，明确提交时才逐张读取与上传，避免同时持有九张原图。删除、重排和窗口变化
+不会触发读取；部分上传失败后，明确重试复用同作用域内已成功的对象，并按当前队列顺序提交。
+
+换号、失去 `DynamicRead`、关闭作用域后，旧草稿和上传结果永久失效；能力恢复不能重新绑定
+旧草稿。写请求不会自动重发。成功后的列表补读失败需要单独重试读取，不能再次发送评论。
+宿主须将动态阅读与互动 ViewModel 放入会话专属 ViewModelStore，在凭证修订或能力撤销时
+清空并重建；只观察能力布尔值不足以区分两个均可读取动态的账号。配置重建则保留同一
+ViewModelStore。独立客户端已采用此组装，迟到的本地图像读取也不能恢复被清除的草稿。
+动态评论点赞未接入：官网动态详情显式关闭该入口，不能将共享帖子评论接口作为动态接口使用。
+官方脚本、请求与真实验证边界见[动态互动设计](dynamic-actions-design.md)及
+[动态发布与帖子转发设计](dynamic-publishing-design.md)、
+[招募分享到动态设计](recruitment-relay-design.md)。发布、上传和转发的真实账号写入尚未验证；
+本批设备、全量构建和公共接入验证见[兼容性矩阵](compatibility-matrix.md)。
 
 ## 消息读取
 
@@ -482,6 +597,9 @@ ViewModelStore。参考客户端的会话作用域会在会话失效时整体清
 保存回应草稿、提交结果和楼中楼分页。界面通过 `applyDutyBrowseFilter`、`setReviewOrder`、
 `openReviewReplies` 和 `loadMoreSubcomments` 驱动操作；刷新错误保留旧内容，分页错误只重试失败页。
 筛选面板取消不请求列表，提交后按板块保存查询，窗口变化保留当前详情和草稿。
+
+官方招募实现的 `hasCommunityIdentity` 只代表当前 `RecruitmentAuthenticated` 读取资格；
+保留 `RecruitmentWrite` 不能使已撤销的部队招募读取入口继续开放，写资格仍单独读取。
 
 `canPerformAuthenticatedWrites` 只代表当前 `RecruitmentWrite`，不能用
 `hasCommunityIdentity` 替代。回应还要求已加载副本或新人详情、未回应、且作者资格明确为非本人。

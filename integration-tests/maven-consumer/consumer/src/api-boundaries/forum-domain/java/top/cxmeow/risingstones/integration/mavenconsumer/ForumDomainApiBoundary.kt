@@ -12,6 +12,10 @@ import top.cxmeow.risingstones.feature.forum.domain.OfficialForumCommentDraft
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumCommentMention
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumMentionCandidate
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumCommentEmojiNumbers
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumBrowsePage
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumSearchField
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumSearchQuery
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumTextSearchService
 import top.cxmeow.risingstones.feature.forum.domain.deadline
 import java.time.Instant
 
@@ -27,6 +31,13 @@ suspend fun browsePublishedForum(
 ): top.cxmeow.risingstones.feature.forum.domain.OfficialForumBrowsePage = service.fetchBrowsePage(
     top.cxmeow.risingstones.feature.forum.domain.OfficialForumBrowseQuery(),
 )
+
+suspend fun searchPublishedForumText(
+    service: OfficialForumTextSearchService,
+    query: OfficialForumSearchQuery,
+    field: OfficialForumSearchField,
+    pageTime: String?,
+): OfficialForumBrowsePage = service.searchTextPage(query, field, pageTime)
 
 suspend fun readPublishedForumInteraction(
     service: OfficialForumInteractionService,

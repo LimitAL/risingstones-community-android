@@ -12,6 +12,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -41,6 +42,7 @@ import top.cxmeow.risingstones.feature.guild.data.GuildApiService
 import top.cxmeow.risingstones.feature.guild.data.GuildImageUploadApiService
 import top.cxmeow.risingstones.feature.guild.data.RisingStonesGuildSessionValidator
 import top.cxmeow.risingstones.feature.dynamic.data.DynamicApiService
+import top.cxmeow.risingstones.feature.dynamic.data.DynamicImageUploadApiService
 import top.cxmeow.risingstones.feature.dynamic.data.RisingStonesDynamicSessionValidator
 import top.cxmeow.risingstones.feature.dynamic.presentation.DynamicViewModel
 import top.cxmeow.risingstones.feature.dynamic.ui.compose.RisingStonesDynamicScreen
@@ -94,9 +96,6 @@ private fun RisingStonesApp() {
     val recruitmentService = runtime.recruitmentService
     val glamourService = runtime.glamourService
     val personalDataService = runtime.personalDataService
-    val dynamicViewModel = viewModel<DynamicViewModel>(factory = viewModelFactory {
-        initializer { DynamicViewModel(runtime.dynamicService) }
-    })
     val messageViewModel = viewModel<MessageViewModel>(factory = viewModelFactory {
         initializer { MessageViewModel(runtime.messageService) }
     })
@@ -106,6 +105,10 @@ private fun RisingStonesApp() {
     var isShowingDynamic by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     val sessionState by sessionProvider.sessionState.collectAsStateWithLifecycle()
     val protectedStateRevision by runtime.authenticatedViewModels.revision.collectAsStateWithLifecycle()
+    val dynamicViewModel = key(protectedStateRevision) {
+        viewModel<DynamicViewModel>(viewModelStoreOwner = runtime.authenticatedViewModels,
+            factory = viewModelFactory { initializer { DynamicViewModel(runtime.dynamicService) } })
+    }
     var isShowingAccount by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     var isShowingRecruitment by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     var isShowingGlamour by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
@@ -129,25 +132,26 @@ private fun RisingStonesApp() {
             isShowingPersonalData = false
         }
     }
-    val readingAccess = CommunityReadingAccess(
-        profile = sessionState.supports(RisingStonesCapability.AccountRead),
-        dynamic = sessionState.supports(RisingStonesCapability.DynamicRead),
-        glamour = sessionState.supports(RisingStonesCapability.GlamourAuthenticated),
-        guildRecruitment = recruitmentService.hasCommunityIdentity,
-        guild = sessionState.supports(RisingStonesCapability.GuildRead),
-    )
+    val readingAccess = communityReadingAccess(sessionState)
+    val currentDynamicViewModel = rememberUpdatedState(dynamicViewModel)
     val readingServices = androidx.compose.runtime.remember(runtime) {
         CommunityReadingServices(runtime.profileService, forumService, runtime.dynamicService, glamourService,
-            recruitmentService, runtime.guildService, guildImages = runtime.guildImageUploadService)
+            recruitmentService, runtime.guildService, guildImages = runtime.guildImageUploadService,
+            dynamicImages = runtime.dynamicImageUploadService,
+            onDynamicPublished = { currentDynamicViewModel.value.refresh() })
     }
     CommunityReadingHost(readingNavigation, readingAccess, readingServices) {
         if (isShowingDynamic && sessionState.supports(RisingStonesCapability.DynamicRead)) {
-            RisingStonesDynamicScreen(
-                viewModel = dynamicViewModel,
-                onNavigateBack = { isShowingDynamic = false },
-                canOpenReference = { it.destination()?.let(readingAccess::allows) == true },
-                onOpenReference = { it.destination()?.let(readingNavigation::open) },
-            )
+            key(protectedStateRevision) {
+                CompositionLocalProvider(LocalViewModelStoreOwner provides runtime.authenticatedViewModels) {
+                    RisingStonesDynamicScreen(
+                        viewModel = dynamicViewModel,
+                        onNavigateBack = { isShowingDynamic = false },
+                        canOpenReference = { it.destination()?.let(readingAccess::allows) == true },
+                        onOpenReference = { it.destination()?.let(readingNavigation::open) },
+                    )
+                }
+            }
         } else if (isShowingMessages && sessionState.supports(RisingStonesCapability.MessageRead)) {
             RisingStonesMessageScreen(messageViewModel, { isShowingMessages = false },
                 canOpenTarget = { it.destination()?.let(readingAccess::allows) == true },
@@ -303,6 +307,7 @@ private class RisingStonesRuntime(context: Context) : ViewModel() {
     val glamourService = GlamourApiService(publicApiClient, sessionProvider)
     val personalDataService = PersonalDataApiService(publicApiClient, sessionProvider, BundledPersonalDataCatalogProvider())
     val dynamicService = DynamicApiService(publicApiClient, sessionProvider)
+    val dynamicImageUploadService = DynamicImageUploadApiService(publicApiClient, sessionProvider)
     val personalDataShareHost = PersonalDataPngShareHost(context, { sessionProvider.sessionState.value.supports(RisingStonesCapability.PersonalData) })
 
     init {
@@ -313,13 +318,7 @@ private class RisingStonesRuntime(context: Context) : ViewModel() {
                 val previousRevision = authenticatedViewModels.revision.value
                 authenticatedViewModels.synchronize(state, credentialRevision)
                 if (previousRevision != authenticatedViewModels.revision.value || !state.supports(RisingStonesCapability.PersonalData)) personalDataShareHost.clear()
-                readingNavigation.synchronize(CommunityReadingAccess(
-                    profile = state.supports(RisingStonesCapability.AccountRead),
-                    dynamic = state.supports(RisingStonesCapability.DynamicRead),
-                    glamour = state.supports(RisingStonesCapability.GlamourAuthenticated),
-                    guildRecruitment = recruitmentService.hasCommunityIdentity,
-                    guild = state.supports(RisingStonesCapability.GuildRead),
-                ), authenticatedViewModels.revision.value)
+                readingNavigation.synchronize(communityReadingAccess(state), authenticatedViewModels.revision.value)
             }
         }
         viewModelScope.launch { sessionProvider.restore() }
