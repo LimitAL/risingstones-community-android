@@ -351,6 +351,8 @@ internal val displayedCapabilities = listOf(
     RisingStonesCapability.GuildRead,
     RisingStonesCapability.GuildWrite,
     RisingStonesCapability.GuildImageUpload,
+    RisingStonesCapability.DynamicWrite,
+    RisingStonesCapability.DynamicImageUpload,
 )
 
 @Composable
@@ -464,5 +466,7 @@ private fun RisingStonesCapability.displayName(): String = stringResource(
         RisingStonesCapability.GuildRead -> R.string.rising_stones_capability_guild_read
         RisingStonesCapability.GuildWrite -> R.string.rising_stones_capability_guild_write
         RisingStonesCapability.GuildImageUpload -> R.string.rising_stones_capability_guild_image_upload
+        RisingStonesCapability.DynamicWrite -> R.string.rising_stones_capability_dynamic_write
+        RisingStonesCapability.DynamicImageUpload -> R.string.rising_stones_capability_dynamic_image_upload
     },
 )

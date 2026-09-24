@@ -68,5 +68,8 @@ sealed class DynamicException(message: String) : Exception(message) {
     data object Unavailable : DynamicException("Dynamic capability unavailable")
     data object InvalidResponse : DynamicException("Invalid dynamic response")
     data object Network : DynamicException("Dynamic transport failed")
+    data object IdentityConflict : DynamicException("Dynamic action identity no longer matches")
+    data object ActionNotEligible : DynamicException("Dynamic action is not eligible")
+    data object ImageUploadFailed : DynamicException("Dynamic image upload failed")
     class Business(val code: Int?) : DynamicException("Dynamic request failed")
 }

@@ -15,9 +15,61 @@ class DynamicApiService(
     private val client: RisingStonesPublicApiClient,
     private val sessionProvider: RisingStonesSessionProvider,
     private val json: Json = Json { ignoreUnknownKeys = true },
-) : DynamicService {
+) : DynamicService, DynamicActionService, DynamicPublishingService, DynamicRecruitmentRelayService {
+    private val actions = DynamicActionApiDelegate(client, sessionProvider, json)
+
     override val canRead: Boolean
         get() = RisingStonesCapability.DynamicRead in sessionProvider.capabilities
+
+    override val canPerformAuthenticatedWrites: Boolean
+        get() = actions.canPerformAuthenticatedWrites
+
+    override val canAttemptAuthenticatedWrites: Boolean
+        get() = actions.canAttemptAuthenticatedWrites
+
+    override suspend fun beginActionScope(): DynamicActionScope = actions.beginActionScope()
+
+    override suspend fun entryEligibility(scope: DynamicActionScope, dynamicId: Int) =
+        actions.entryEligibility(scope, dynamicId)
+
+    override suspend fun commentEligibility(scope: DynamicActionScope, commentId: Int) =
+        actions.commentEligibility(scope, commentId)
+
+    override suspend fun fetchMentionCandidates(scope: DynamicActionScope, query: DynamicListQuery) =
+        actions.fetchMentionCandidates(scope, query)
+
+    override suspend fun fetchComments(
+        scope: DynamicActionScope,
+        dynamicId: Int,
+        query: DynamicListQuery,
+    ) = actions.fetchComments(scope, dynamicId, query)
+
+    override suspend fun fetchReplies(
+        scope: DynamicActionScope,
+        rootParentId: Int,
+        query: DynamicListQuery,
+    ) = actions.fetchReplies(scope, rootParentId, query)
+
+    override suspend fun toggleDynamicLike(scope: DynamicActionScope, dynamicId: Int) =
+        actions.toggleDynamicLike(scope, dynamicId)
+
+    override suspend fun comment(scope: DynamicActionScope, draft: DynamicCommentDraft) =
+        actions.comment(scope, draft)
+
+    override suspend fun deleteOwnComment(scope: DynamicActionScope, commentId: Int) =
+        actions.deleteOwnComment(scope, commentId)
+
+    override suspend fun deleteOwnDynamic(scope: DynamicActionScope, dynamicId: Int) =
+        actions.deleteOwnDynamic(scope, dynamicId)
+
+    override suspend fun publish(scope: DynamicActionScope, draft: DynamicPublishDraft) =
+        actions.publish(scope, draft)
+
+    override suspend fun relayPost(scope: DynamicActionScope, draft: DynamicPostRelayDraft) =
+        actions.relayPost(scope, draft)
+
+    override suspend fun relayRecruitment(scope: DynamicActionScope, draft: DynamicRecruitmentRelayDraft) =
+        actions.relayRecruitment(scope, draft)
 
     override suspend fun fetchFeed(query: DynamicListQuery): DynamicPage<DynamicEntry> =
         get("getFollowDynamicList", query.parameters()).page(query, ::entry)
@@ -98,13 +150,13 @@ internal suspend fun readDynamicPayload(
     }
 }
 
-private fun DynamicListQuery.parameters(): List<RisingStonesApiQueryItem> =
+internal fun DynamicListQuery.parameters(): List<RisingStonesApiQueryItem> =
     listOf(q("page", page.coerceAtLeast(1)), q("limit", limit.coerceIn(1, 100))) +
         listOfNotNull(pageTime?.takeIf { page > 1 && it.isNotBlank() }?.let { q("pageTime", it) })
 
 internal fun q(name: String, value: Any) = RisingStonesApiQueryItem(name, value.toString())
 
-private fun <T> JsonObject.page(query: DynamicListQuery, map: (JsonObject) -> T?): DynamicPage<T> {
+internal fun <T> JsonObject.page(query: DynamicListQuery, map: (JsonObject) -> T?): DynamicPage<T> {
     val rows = this["rows"] as? JsonArray ?: throw DynamicException.InvalidResponse
     val mapped = rows.map { map(it as? JsonObject ?: throw DynamicException.InvalidResponse)
         ?: throw DynamicException.InvalidResponse }
@@ -128,7 +180,7 @@ private fun entry(value: JsonObject): DynamicEntry? {
         value.number("is_like") == 1, reference)
 }
 
-private fun comment(value: JsonObject): DynamicComment? = DynamicComment(
+internal fun comment(value: JsonObject): DynamicComment? = DynamicComment(
     value.number("id")?.takeIf { it > 0 } ?: return null, value.author(), value.text("mask_content").orEmpty(),
     imageUrls(value.text("comment_pic")), value.text("created_at").date(), value.text("to_cname"),
     value.number("like_count") ?: 0, value.number("children_count") ?: 0,
@@ -138,7 +190,7 @@ private fun JsonObject.author() = DynamicAuthor(text("uuid").orEmpty(), text("ch
     text("area_name").orEmpty(), text("group_name").orEmpty(), imageUrls(text("avatar")).firstOrNull())
 
 private fun JsonObject.text(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
-private fun JsonObject.number(key: String): Int? = text(key)?.toIntOrNull()
+internal fun JsonObject.number(key: String): Int? = text(key)?.toIntOrNull()
 
 private fun String?.date(): Instant? = this?.let { text ->
     runCatching { Instant.parse(text) }.getOrNull() ?: runCatching {

@@ -5,9 +5,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -48,6 +52,23 @@ class DynamicScreenTest {
         rule.onNodeWithText("View source").assertDoesNotExist()
     }
 
+    @Test fun publishingNavigationAddsOptionalCreateAction() {
+        var creates = 0
+        val model = DynamicViewModel(Service)
+        rule.setContent { MaterialTheme {
+            RisingStonesDynamicPublishingNavigation({ creates++ }) {
+                RisingStonesDynamicScreen(model, {})
+            }
+        } }
+        rule.onNodeWithTag("dynamic-publish-new").performClick()
+        rule.runOnIdle { assertEquals(1, creates) }
+    }
+
+    @Test fun absentPublishingNavigationKeepsCreateActionHidden() {
+        show(599)
+        rule.onNodeWithTag("dynamic-publish-new").assertDoesNotExist()
+    }
+
     private fun sourceScreen(allowSource: Boolean, onOpen: (DynamicReference) -> Unit) {
         val service = object : DynamicService by Service {
             override suspend fun fetchDetail(id: Int) = Service.fetchDetail(id).copy(
@@ -69,9 +90,9 @@ class DynamicScreenTest {
     @Test fun resizingKeepsMeaningfulSelection() {
         val width = mutableStateOf(599)
         val model = DynamicViewModel(Service)
-        rule.setContent { MaterialTheme {
+        rule.setContent { CompositionLocalProvider(LocalDensity provides Density(1f)) { MaterialTheme {
             Box(Modifier.width(width.value.dp).height(1000.dp)) { RisingStonesDynamicScreen(model, {}) }
-        } }
+        } } }
         waitFor("Feed item")
         rule.onNodeWithText("Feed item").performClick()
         waitFor("Detail body")
@@ -90,9 +111,9 @@ class DynamicScreenTest {
     }
     private fun show(width: Int) {
         val model = DynamicViewModel(Service)
-        rule.setContent { MaterialTheme {
+        rule.setContent { CompositionLocalProvider(LocalDensity provides Density(1f)) { MaterialTheme {
             Box(Modifier.width(width.dp).height(1000.dp)) { RisingStonesDynamicScreen(model, {}) }
-        } }
+        } } }
     }
     private fun waitFor(text: String) {
         rule.waitUntil(5000) { rule.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }

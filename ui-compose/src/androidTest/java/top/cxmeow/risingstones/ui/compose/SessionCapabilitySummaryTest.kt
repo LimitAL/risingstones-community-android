@@ -96,6 +96,8 @@ class SessionCapabilitySummaryTest {
             GuildRead=false
             GuildWrite=false
             GuildImageUpload=false
+            DynamicWrite=false
+            DynamicImageUpload=false
         """.trimIndent()
 
         assertEquals(expectedReport, sanitizedCapabilityReport(activeSession))
@@ -144,6 +146,22 @@ class SessionCapabilitySummaryTest {
         )
     }
 
+    @Test
+    fun verifiedDynamicWriteDoesNotClaimImageUpload() {
+        assertIndependentDynamicWriteSummary(
+            verified = RisingStonesCapability.DynamicWrite,
+            unverified = RisingStonesCapability.DynamicImageUpload,
+        )
+    }
+
+    @Test
+    fun verifiedDynamicImageUploadDoesNotClaimOtherDynamicWrites() {
+        assertIndependentDynamicWriteSummary(
+            verified = RisingStonesCapability.DynamicImageUpload,
+            unverified = RisingStonesCapability.DynamicWrite,
+        )
+    }
+
     private fun assertIndependentGuildWriteSummary(
         verified: RisingStonesCapability,
         unverified: RisingStonesCapability,
@@ -160,6 +178,24 @@ class SessionCapabilitySummaryTest {
         assertTrue("${unverified.name}=false" in report)
         assertTrue("ForumWrite=false" in report)
         assertTrue("RecruitmentWrite=false" in report)
+    }
+
+    private fun assertIndependentDynamicWriteSummary(
+        verified: RisingStonesCapability,
+        unverified: RisingStonesCapability,
+    ) {
+        val session = activeSession.copy(capabilities = setOf(RisingStonesCapability.DynamicRead, verified))
+        showAtWidth(400.dp, session)
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        composeRule.onNodeWithTag("rising-stones-capability-${verified.name}")
+            .performScrollTo().assertTextContains(context.getString(R.string.rising_stones_capability_verified))
+        composeRule.onNodeWithTag("rising-stones-capability-${unverified.name}")
+            .performScrollTo().assertTextContains(context.getString(R.string.rising_stones_capability_not_verified))
+        val report = sanitizedCapabilityReport(session).lines()
+        assertTrue("${verified.name}=true" in report)
+        assertTrue("${unverified.name}=false" in report)
+        assertTrue("GuildWrite=false" in report)
+        assertTrue("GuildImageUpload=false" in report)
     }
 
     @Test

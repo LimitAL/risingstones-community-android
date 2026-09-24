@@ -228,6 +228,25 @@ class DynamicViewModel(private val service: DynamicService) : ViewModel() {
         }
     }
 
+    fun applyLikeResult(result: DynamicLikeResult) {
+        val id = state.value.selectedId ?: return
+        fun DynamicEntry.changed(): DynamicEntry {
+            val liked = result == DynamicLikeResult.Liked
+            if (isLiked == liked) return this
+            return copy(isLiked = liked, likeCount = (likeCount + if (liked) 1 else -1).coerceAtLeast(0))
+        }
+        mutableState.update { current -> current.copy(
+            detail = current.detail?.takeIf { it.id == id }?.changed() ?: current.detail,
+            items = current.items.map { if (it.id == id) it.changed() else it },
+        ) }
+    }
+
+    fun removeDeletedSelected() {
+        val id = state.value.selectedId ?: return
+        clearSelection()
+        mutableState.update { current -> current.copy(items = current.items.filterNot { it.id == id }) }
+    }
+
     private fun cancelDetails() {
         detailJob?.cancel()
         commentsJob?.cancel()

@@ -152,6 +152,74 @@ class RisingStonesGuildCapabilityScopeTest {
     }
 
     @Test
+    fun dynamicScopeIsBoundToDynamicReadAndNeverAuthorizesGuildReadsOrWrites() = runTest {
+        val fixture = GuildScopeFixture(setOf(RisingStonesCapability.DynamicRead, RisingStonesCapability.GuildRead))
+        fixture.activate()
+        assertNull(fixture.provider.captureCapabilityScope(DynamicActions + RisingStonesCapability.GuildWrite))
+
+        val scope = requireNotNull(fixture.provider.captureCapabilityScope(DynamicActions))
+        scope.authorizer.authorize(DynamicReadContext, RisingStonesHeaderSink { _, _ -> })
+        assertRejectedWithoutHeaders(scope.authorizer, GuildReadContext)
+        assertRejectedWithoutHeaders(scope.authorizer, DynamicWriteContext)
+        assertEquals(
+            setOf(RisingStonesCapability.DynamicRead, RisingStonesCapability.GuildRead),
+            fixture.provider.capabilities,
+        )
+
+        val attempt = requireNotNull(scope.beginCapabilityAttempt(DynamicWriteContext))
+        authorize(attempt, DynamicWriteContext)
+        assertTrue(attempt.complete())
+        assertTrue(RisingStonesCapability.DynamicWrite in fixture.provider.capabilities)
+        assertFalse(RisingStonesCapability.DynamicImageUpload in fixture.provider.capabilities)
+        scope.close()
+    }
+
+    @Test
+    fun losingAndRegainingDynamicReadPermanentlyInvalidatesScopeAndLateAttempt() = runTest {
+        val fixture = GuildScopeFixture(setOf(RisingStonesCapability.DynamicRead))
+        fixture.activate()
+        val scope = requireNotNull(fixture.provider.captureCapabilityScope(DynamicActions))
+        val attempt = requireNotNull(scope.beginCapabilityAttempt(DynamicImageContext))
+        authorize(attempt, DynamicImageContext)
+
+        fixture.capabilities = emptySet()
+        assertNotNull(fixture.provider.refreshAuthorizer())
+        fixture.capabilities = setOf(RisingStonesCapability.DynamicRead)
+        assertNotNull(fixture.provider.refreshAuthorizer())
+
+        assertTrue(fixture.provider.canAttemptCapability(RisingStonesCapability.DynamicImageUpload))
+        assertFalse(scope.isCurrent())
+        assertRejectedWithoutHeaders(scope.authorizer, DynamicReadContext)
+        assertFalse((attempt as RisingStonesCapabilityAttemptGuard).isCurrent())
+        assertFalse(attempt.complete())
+        assertFalse(RisingStonesCapability.DynamicImageUpload in fixture.provider.capabilities)
+        assertTrue(requireNotNull(fixture.provider.captureCapabilityScope(DynamicActions)).isCurrent())
+        scope.close()
+    }
+
+    @Test
+    fun closedOrReplacedDynamicScopeRejectsLateAttemptResults() = runTest {
+        val fixture = GuildScopeFixture(setOf(RisingStonesCapability.DynamicRead))
+        fixture.activate()
+        val closedScope = requireNotNull(fixture.provider.captureCapabilityScope(DynamicActions))
+        val closedAttempt = requireNotNull(closedScope.beginCapabilityAttempt(DynamicWriteContext))
+        authorize(closedAttempt, DynamicWriteContext)
+        closedScope.close()
+        assertFalse(closedAttempt.complete())
+
+        val replacementScope = requireNotNull(fixture.provider.captureCapabilityScope(DynamicActions))
+        val replacementAttempt = requireNotNull(replacementScope.beginCapabilityAttempt(DynamicImageContext))
+        authorize(replacementAttempt, DynamicImageContext)
+        fixture.activate("replacement")
+        assertFalse(replacementScope.isCurrent())
+        assertFalse((replacementAttempt as RisingStonesCapabilityAttemptGuard).isCurrent())
+        assertFalse(replacementAttempt.complete())
+        assertFalse(RisingStonesCapability.DynamicWrite in fixture.provider.capabilities)
+        assertFalse(RisingStonesCapability.DynamicImageUpload in fixture.provider.capabilities)
+        replacementScope.close()
+    }
+
+    @Test
     fun successfulReadRevalidationKeepsScopeAndChildrenBoundWithoutGranting() = runTest {
         val fixture = GuildScopeFixture()
         fixture.activate()
@@ -235,12 +303,20 @@ private suspend fun assertRejectedWithoutHeaders(authorizer: RisingStonesRequest
 }
 
 private val GuildActions = setOf(RisingStonesCapability.GuildWrite, RisingStonesCapability.GuildImageUpload)
+private val DynamicActions = setOf(RisingStonesCapability.DynamicWrite, RisingStonesCapability.DynamicImageUpload)
 private val GuildReadContext = RisingStonesRequestContext(
     "api/home/guild/fixture-read", RisingStonesAuthenticationRequirement.Required, RisingStonesCapability.GuildRead)
 private val GuildWriteContext = RisingStonesRequestContext(
     "api/home/guild/fixture-action", RisingStonesAuthenticationRequirement.Required, RisingStonesCapability.GuildWrite)
 private val GuildImageContext = RisingStonesRequestContext(
     "api/common/fixture-image-token", RisingStonesAuthenticationRequirement.Required, RisingStonesCapability.GuildImageUpload)
+private val DynamicReadContext = RisingStonesRequestContext(
+    "api/dynamic/fixture-read", RisingStonesAuthenticationRequirement.Required, RisingStonesCapability.DynamicRead)
+private val DynamicWriteContext = RisingStonesRequestContext(
+    "api/dynamic/fixture-action", RisingStonesAuthenticationRequirement.Required, RisingStonesCapability.DynamicWrite)
+private val DynamicImageContext = RisingStonesRequestContext(
+    "api/dynamic/fixture-image-token", RisingStonesAuthenticationRequirement.Required,
+    RisingStonesCapability.DynamicImageUpload)
 private enum class GuildScopeMutation { Accept, Restore, SignOut }
 
 private class GuildScopeFixture(var capabilities: Set<RisingStonesCapability> = setOf(RisingStonesCapability.GuildRead)) {

@@ -17,7 +17,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.fromHtml
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
@@ -43,25 +42,35 @@ fun RisingStonesDynamicScreen(
     canOpenReference: (DynamicReference) -> Boolean = { true },
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val actions = rememberDynamicActionRuntime("main")
+    val leaveScreen = {
+        actions?.model?.clearProtectedContent()
+        onNavigateBack()
+    }
     val listScrollState = rememberLazyListState()
     val detailScrollState = key(state.selectedId) { rememberLazyListState() }
     LaunchedEffect(viewModel) { viewModel.ensureLoaded() }
     Scaffold(modifier, topBar = {
         TopAppBar(title = { Text(stringResource(R.string.dynamic_title)) },
             navigationIcon = { TextButton(onClick = {
-                if (state.canNavigateBackInDetail) viewModel.clearSelection() else onNavigateBack()
+                if (state.selectedId != null) viewModel.clearSelection() else leaveScreen()
             }) { Text(stringResource(R.string.dynamic_back)) } },
-            actions = { TextButton(onClick = viewModel::refresh) { Text(stringResource(R.string.dynamic_refresh)) } })
+            actions = {
+                DynamicCreateAction()
+                TextButton(onClick = viewModel::refresh) { Text(stringResource(R.string.dynamic_refresh)) }
+            })
     }) { padding ->
         BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
             val mode = dynamicLayoutMode(maxWidth.value.toInt())
+            DynamicInteractionHost(actions, state.selectedId, state.comments, state.replies,
+                viewModel::refreshDetail, viewModel::removeDeletedSelected, viewModel::applyLikeResult)
             BackHandler {
                 if (state.canNavigateBackInDetail || (mode == DynamicLayoutMode.Compact && state.selectedId != null)) viewModel.clearSelection()
-                else onNavigateBack()
+                else leaveScreen()
             }
             if (mode == DynamicLayoutMode.Compact) {
                 if (state.selectedId == null) DynamicList(state, viewModel, Modifier.fillMaxSize(), listScrollState)
-                else DynamicDetail(state, viewModel, onOpenReference, canOpenReference, Modifier.fillMaxSize(), true, detailScrollState)
+                else DynamicDetail(state, viewModel, actions, onOpenReference, canOpenReference, Modifier.fillMaxSize(), true, detailScrollState)
             } else {
                 Row(Modifier.fillMaxSize()) {
                     DynamicList(state, viewModel, Modifier.width(if (mode == DynamicLayoutMode.Medium) 300.dp else 380.dp)
@@ -69,7 +78,7 @@ fun RisingStonesDynamicScreen(
                     VerticalDivider()
                     Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
                         if (state.selectedId == null) Message(stringResource(R.string.dynamic_select))
-                        else DynamicDetail(state, viewModel, onOpenReference, canOpenReference,
+                        else DynamicDetail(state, viewModel, actions, onOpenReference, canOpenReference,
                             Modifier.widthIn(max = 840.dp).fillMaxHeight().fillMaxWidth(), false, detailScrollState)
                     }
                 }
@@ -89,19 +98,26 @@ fun RisingStonesDynamicDetailScreen(
     canOpenReference: (DynamicReference) -> Boolean = { true },
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val actions = rememberDynamicActionRuntime("detail")
+    val leaveScreen = {
+        actions?.model?.clearProtectedContent()
+        onNavigateBack()
+    }
     val scrollState = key(state.selectedId) { rememberLazyListState() }
-    BackHandler(onBack = onNavigateBack)
+    BackHandler(onBack = leaveScreen)
     Scaffold(modifier, topBar = {
         TopAppBar(title = { Text(stringResource(R.string.dynamic_title)) }, navigationIcon = {
-            TextButton(onClick = onNavigateBack) { Text(stringResource(R.string.dynamic_back)) }
+            TextButton(onClick = leaveScreen) { Text(stringResource(R.string.dynamic_back)) }
         })
     }) { padding ->
         Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
+            DynamicInteractionHost(actions, state.selectedId, state.comments, state.replies,
+                viewModel::refreshDetail, leaveScreen, viewModel::applyLikeResult)
             when {
                 state.status == DynamicLoadStatus.AuthenticationRequired -> Message(stringResource(R.string.dynamic_sign_in))
                 state.status == DynamicLoadStatus.Unavailable -> Message(stringResource(R.string.dynamic_unavailable))
                 state.selectedId == null -> Message(stringResource(R.string.dynamic_select))
-                else -> DynamicDetail(state, viewModel, onOpenReference, canOpenReference,
+                else -> DynamicDetail(state, viewModel, actions, onOpenReference, canOpenReference,
                     Modifier.widthIn(max = 840.dp).fillMaxSize(), showBack = false, scrollState = scrollState)
             }
         }
@@ -140,7 +156,7 @@ private fun DynamicList(state: DynamicUiState, model: DynamicViewModel, modifier
 }
 
 @Composable
-private fun DynamicDetail(state: DynamicUiState, model: DynamicViewModel,
+private fun DynamicDetail(state: DynamicUiState, model: DynamicViewModel, actions: DynamicActionRuntime?,
     onOpenReference: ((DynamicReference) -> Unit)?, canOpenReference: (DynamicReference) -> Boolean,
     modifier: Modifier, showBack: Boolean, scrollState: LazyListState) {
     LazyColumn(modifier.testTag("dynamic-detail-content"), state = scrollState, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -154,6 +170,9 @@ private fun DynamicDetail(state: DynamicUiState, model: DynamicViewModel,
         if (state.detailStatus == DynamicLoadStatus.Failed) item { Retry(model::refreshDetail, retained = state.detail != null) }
         state.detail?.let { detail ->
             item { Entry(detail, Modifier.fillMaxWidth(), false) }
+            actions?.let { runtime -> item {
+                DynamicInteractionPanel(runtime, detail)
+            } }
             detail.reference?.let { reference ->
                 if (onOpenReference != null && canOpenReference(reference) && reference.origin != DynamicOrigin.Unknown &&
                     reference.id.toIntOrNull()?.let { it > 0 } == true) item {
@@ -169,9 +188,13 @@ private fun DynamicDetail(state: DynamicUiState, model: DynamicViewModel,
         items(state.comments, key = DynamicComment::id) { comment ->
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Comment(comment)
+                actions?.let { DynamicCommentActions(it, comment) }
                 state.replies[comment.id].orEmpty().forEach { reply ->
                     Surface(color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.padding(start = 20.dp)) {
-                        Column(Modifier.padding(12.dp)) { Comment(reply) }
+                        Column(Modifier.padding(12.dp)) {
+                            Comment(reply)
+                            actions?.let { DynamicCommentActions(it, reply, comment.id) }
+                        }
                     }
                 }
                 when {
@@ -199,8 +222,7 @@ private fun Entry(entry: DynamicEntry, modifier: Modifier, preview: Boolean) {
         DynamicAuthorIdentity(entry.author)
         Text(listOf(entry.author.areaName, entry.author.groupName).filter(String::isNotBlank).joinToString(" / "),
             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(remember(entry.contentHtml) { AnnotatedString.fromHtml(entry.contentHtml) },
-            maxLines = if (preview) 5 else Int.MAX_VALUE, overflow = TextOverflow.Ellipsis)
+        DynamicRichText(entry.contentHtml, maxLines = if (preview) 5 else Int.MAX_VALUE)
         Images(entry.imageUrls)
         entry.reference?.let { source ->
             Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = MaterialTheme.shapes.medium) {
@@ -222,7 +244,7 @@ private fun Entry(entry: DynamicEntry, modifier: Modifier, preview: Boolean) {
 private fun Comment(comment: DynamicComment) {
     DynamicAuthorIdentity(comment.author)
     comment.replyToName?.takeIf(String::isNotBlank)?.let { Text(stringResource(R.string.dynamic_reply_to, it)) }
-    Text(remember(comment.contentHtml) { AnnotatedString.fromHtml(comment.contentHtml) })
+    DynamicRichText(comment.contentHtml)
     Images(comment.imageUrls)
 }
 

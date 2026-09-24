@@ -39,7 +39,7 @@ class RisingStonesWebCookieSessionProvider(
     private val mutationMutex = Mutex()
     private var credentialGeneration = 0L
     // A temporarily lost prerequisite must not revive an operation captured before revocation.
-    private var guildReadGeneration = 0L
+    private val prerequisiteGenerations = mutableMapOf<RisingStonesCapability, Long>()
     private val mutableCredentialRevision = MutableStateFlow(0L)
     /** Opaque lifecycle counter; lets hosts clear protected models even when state emissions conflate. */
     val credentialRevision: StateFlow<Long> = mutableCredentialRevision.asStateFlow()
@@ -131,9 +131,7 @@ class RisingStonesWebCookieSessionProvider(
             val candidate = credential ?: return@withLock null
             try {
                 val validation = sessionValidator.validateSession(candidate.authorizer())
-                if (RisingStonesCapability.GuildRead !in validation.capabilities) {
-                    guildReadGeneration++
-                }
+                invalidateMissingReadPrerequisites(validation.capabilities)
                 verifiedWrites = verifiedWrites.filterTo(mutableSetOf()) {
                     prerequisiteFor(it) in validation.capabilities
                 }
@@ -178,25 +176,32 @@ class RisingStonesWebCookieSessionProvider(
     ): RisingStonesCapabilityScope? = mutationMutex.withLock {
         currentCoroutineContext().ensureActive()
         val requestedCapabilities = capabilities.toSet()
+        val prerequisite = requestedCapabilities
+            .firstOrNull()
+            ?.let(::prerequisiteFor)
+            ?: return@withLock null
+        if (prerequisite !in setOf(RisingStonesCapability.GuildRead, RisingStonesCapability.DynamicRead)) {
+            return@withLock null
+        }
         if (requestedCapabilities.isEmpty() || requestedCapabilities.any {
-                prerequisiteFor(it) != RisingStonesCapability.GuildRead || !canAttemptCapability(it)
+                prerequisiteFor(it) != prerequisite || !canAttemptCapability(it)
             }
         ) return@withLock null
         val capturedCredential = credential ?: return@withLock null
         val generation = credentialGeneration
-        val guildGeneration = guildReadGeneration
+        val prerequisiteGeneration = prerequisiteGenerations[prerequisite] ?: 0L
         object : RisingStonesCapabilityScope {
             private val closed = AtomicBoolean(false)
             private fun belongsToCurrentScope(): Boolean = !closed.get() &&
                 generation == credentialGeneration && credential === capturedCredential &&
-                guildGeneration == guildReadGeneration &&
+                prerequisiteGeneration == (prerequisiteGenerations[prerequisite] ?: 0L) &&
                 requestedCapabilities.all(::canAttemptCapability)
 
             override val authorizer = RisingStonesRequestAuthorizer { context, sink ->
                 mutationMutex.withLock {
                     currentCoroutineContext().ensureActive()
                     check(context.requirement == RisingStonesAuthenticationRequirement.Required &&
-                        context.capability == RisingStonesCapability.GuildRead && context.path.isNotBlank() &&
+                        context.capability == prerequisite && context.path.isNotBlank() &&
                         belongsToCurrentScope()) {
                         "Rising Stones operation authorization is no longer available"
                     }
@@ -232,14 +237,15 @@ class RisingStonesWebCookieSessionProvider(
         ) return null
         val capturedCredential = credential ?: return null
         val generation = credentialGeneration
-        val guildGeneration = guildReadGeneration
-        val requiresGuildRead = prerequisiteFor(capability) == RisingStonesCapability.GuildRead
+        val prerequisite = prerequisiteFor(capability)
+        val prerequisiteGeneration = prerequisite?.let { prerequisiteGenerations[it] ?: 0L }
         return object : RisingStonesCapabilityAttempt, RisingStonesCapabilityAttemptGuard {
             // 0 = unused, 1 = authorized once, 2 = closed or completed.
             private val lifecycle = AtomicInteger(0)
             private fun belongsToCurrentCredential() = generation == credentialGeneration &&
                 credential === capturedCredential && canAttemptCapability(capability) &&
-                (!requiresGuildRead || guildGeneration == guildReadGeneration) && scopeIsCurrent()
+                (prerequisite == null || prerequisiteGeneration == (prerequisiteGenerations[prerequisite] ?: 0L)) &&
+                scopeIsCurrent()
 
             override suspend fun isCurrent(): Boolean = mutationMutex.withLock {
                 currentCoroutineContext().ensureActive()
@@ -284,8 +290,18 @@ class RisingStonesWebCookieSessionProvider(
             RisingStonesCapability.ForumImageUpload -> RisingStonesCapability.AccountRead
             RisingStonesCapability.GuildWrite,
             RisingStonesCapability.GuildImageUpload -> RisingStonesCapability.GuildRead
+            RisingStonesCapability.DynamicWrite,
+            RisingStonesCapability.DynamicImageUpload -> RisingStonesCapability.DynamicRead
             else -> null
         }
+
+    private fun invalidateMissingReadPrerequisites(capabilities: Set<RisingStonesCapability>) {
+        setOf(RisingStonesCapability.GuildRead, RisingStonesCapability.DynamicRead)
+            .filterNot(capabilities::contains)
+            .forEach { prerequisite ->
+                prerequisiteGenerations[prerequisite] = (prerequisiteGenerations[prerequisite] ?: 0L) + 1L
+            }
+    }
 
     private suspend fun validateAndActivate(
         candidate: RisingStonesCookieCredential,

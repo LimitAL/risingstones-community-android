@@ -20,6 +20,8 @@ enum class RisingStonesCapability {
     GuildRead,
     GuildWrite,
     GuildImageUpload,
+    DynamicWrite,
+    DynamicImageUpload,
 }
 
 enum class RisingStonesCredentialSource {
