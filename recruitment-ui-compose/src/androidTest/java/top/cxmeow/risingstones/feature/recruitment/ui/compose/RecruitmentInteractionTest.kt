@@ -477,11 +477,42 @@ class RecruitmentInteractionTest {
         compose.onAllNodesWithTag("recruitment-author-link").assertCountEquals(0)
     }
 
+    @Test fun relayEntryUsesLoadedDetailsForAllBoardsWithoutRecruitmentWriteEligibility() {
+        RecruitmentBoardKind.entries.forEach { board ->
+            val calls = mutableListOf<RecruitmentRelayCall>()
+            val service = RecruitmentInteractionServiceFixture(isCurrentUserAuthor = true).apply {
+                canAttemptAuthenticatedWrites = false
+            }
+            show(service, board = board, onRelay = { id, sourceBoard, title ->
+                calls += RecruitmentRelayCall(id, sourceBoard, title)
+            })
+            detailNode(hasTestTag("recruitment-relay-dynamic")).performClick()
+            val expectedTitle = if (board == RecruitmentBoardKind.Duty) {
+                "Synthetic duty"
+            } else if (board == RecruitmentBoardKind.Beginner) {
+                "Synthetic beginner"
+            } else {
+                "Synthetic roleplay"
+            }
+            assertEquals(listOf(RecruitmentRelayCall(42, board, expectedTitle)), calls)
+            assertTrue(service.responses.isEmpty())
+        }
+    }
+
+    @Test fun absentRelayCallbackKeepsLoadedDetailReadOnly() {
+        show(board = RecruitmentBoardKind.Other)
+        compose.onNodeWithTag("recruitment-relay-dynamic").assertDoesNotExist()
+    }
+
     private fun show(service: RecruitmentInteractionServiceFixture = RecruitmentInteractionServiceFixture(),
         width: Int = 599, board: RecruitmentBoardKind = RecruitmentBoardKind.Duty,
         workspace: Boolean = false, onOpenAuthor: ((String) -> Unit)? = null,
-        lifecycleOwner: LifecycleOwner? = null): RecruitmentInteractionServiceFixture {
-        val configuration = RecruitmentInteractionConfiguration(service, width, board, workspace, onOpenAuthor, lifecycleOwner)
+        lifecycleOwner: LifecycleOwner? = null,
+        onRelay: ((Int, RecruitmentBoardKind, String) -> Unit)? = null,
+    ): RecruitmentInteractionServiceFixture {
+        val configuration = RecruitmentInteractionConfiguration(
+            service, width, board, workspace, onOpenAuthor, lifecycleOwner, onRelay,
+        )
         compose.runOnIdle { RecruitmentInteractionFixture.configuration = configuration }
         if (workspace) waitForText("Synthetic duty") else {
             compose.waitUntil { service.detailReads > 0 }
@@ -548,13 +579,15 @@ class RecruitmentInteractionTestActivity : ComponentActivity() {
                                 configuration.measuredWidthDp = with(density) { it.width.toDp().value }
                             }) {
                                 RisingStonesRecruitmentAuthorNavigation(configuration.onOpenAuthor) {
-                                when {
-                                    !configuration.showRoute -> Text("Fixture route closed")
-                                    configuration.workspace -> RisingStonesRecruitmentScreen(configuration.service,
-                                        { configuration.showRoute = false })
-                                    else -> RisingStonesRecruitmentDetailScreen(configuration.service, 42,
-                                        configuration.board, { configuration.showRoute = false })
-                                }
+                                    RisingStonesRecruitmentRelayNavigation(configuration.onRelay) {
+                                        when {
+                                            !configuration.showRoute -> Text("Fixture route closed")
+                                            configuration.workspace -> RisingStonesRecruitmentScreen(configuration.service,
+                                                { configuration.showRoute = false })
+                                            else -> RisingStonesRecruitmentDetailScreen(configuration.service, 42,
+                                                configuration.board, { configuration.showRoute = false })
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -571,12 +604,15 @@ private object RecruitmentInteractionFixture {
 
 private class RecruitmentInteractionConfiguration(val service: RecruitmentInteractionServiceFixture,
     val width: Int, val board: RecruitmentBoardKind, val workspace: Boolean, val onOpenAuthor: ((String) -> Unit)? = null,
-    val lifecycleOwner: LifecycleOwner? = null) {
+    val lifecycleOwner: LifecycleOwner? = null,
+    val onRelay: ((Int, RecruitmentBoardKind, String) -> Unit)? = null,
+) {
     var measuredWidthDp = 0f
     var showRoute by mutableStateOf(true)
 }
 
 private data class ResponseCall(val board: RecruitmentBoardKind, val id: Int, val contact: String)
+private data class RecruitmentRelayCall(val id: Int, val board: RecruitmentBoardKind, val title: String)
 
 private class RecruitmentInteractionServiceFixture(var isCurrentUserAuthor: Boolean? = false) :
     RecruitmentBrowsingService, RecruitmentResponseEligibilityService, RecruitmentActionEligibilityService,

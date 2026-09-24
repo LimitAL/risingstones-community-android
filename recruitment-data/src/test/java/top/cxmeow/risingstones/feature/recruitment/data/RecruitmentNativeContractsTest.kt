@@ -254,8 +254,26 @@ class RecruitmentNativeContractsTest {
         assertTrue(transport.requests.isEmpty())
         session.capabilities = setOf(RisingStonesCapability.RecruitmentWrite)
         assertTrue(service.canPerformAuthenticatedWrites)
+        assertFalse(service.hasCommunityIdentity)
         session.capabilities = emptySet()
         assertFalse(service.canPerformAuthenticatedWrites)
+    }
+
+    @Test fun retainedWriteCapabilityCannotReopenRevokedGuildReads() {
+        val transport = NativeRecruitmentTransport()
+        val session = NativeRecruitmentSession(setOf(
+            RisingStonesCapability.AccountRead, RisingStonesCapability.DynamicRead,
+            RisingStonesCapability.RecruitmentWrite, RisingStonesCapability.RecruitmentAuthenticated,
+        ))
+        val service = transport.service(session)
+        assertTrue(service.hasCommunityIdentity)
+        session.capabilities = session.capabilities - RisingStonesCapability.RecruitmentAuthenticated
+        assertTrue(service.canPerformAuthenticatedWrites)
+        assertFalse(service.hasCommunityIdentity)
+        assertThrows(DutyRecruitmentException.AuthenticationRequired::class.java) {
+            runBlocking { service.fetchCommunityRecruitmentDetail(42, CommunityRecruitmentKind.Guild) }
+        }
+        assertTrue(transport.requests.isEmpty())
     }
 
     @Test

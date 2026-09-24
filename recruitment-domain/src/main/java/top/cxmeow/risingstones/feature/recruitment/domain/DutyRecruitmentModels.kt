@@ -303,6 +303,7 @@ sealed class DutyRecruitmentException(message: String) : Exception(message) {
 }
 
 interface DutyRecruitmentService {
+    /** Current verified identity for authenticated recruitment reads; write permission is separate. */
     val hasCommunityIdentity: Boolean
     suspend fun fetchDutyRecruitments(query: DutyRecruitmentListQuery): DutyRecruitmentListPage
     suspend fun fetchDutyRecruitmentDetail(id: Int): DutyRecruitmentDetail

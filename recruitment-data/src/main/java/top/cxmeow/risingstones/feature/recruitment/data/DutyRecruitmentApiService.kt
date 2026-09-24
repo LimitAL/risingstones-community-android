@@ -107,10 +107,7 @@ class DutyRecruitmentApiService(
             ?.canAttemptCapability(RisingStonesCapability.RecruitmentWrite) == true
 
     override val hasCommunityIdentity: Boolean
-        get() = sessionProvider.capabilities.any {
-            it == RisingStonesCapability.RecruitmentAuthenticated ||
-                it == RisingStonesCapability.RecruitmentWrite
-        }
+        get() = RisingStonesCapability.RecruitmentAuthenticated in sessionProvider.capabilities
 
     override suspend fun fetchDutyRecruitments(query: DutyRecruitmentListQuery): DutyRecruitmentListPage =
         fetchDutyRecruitments(DutyRecruitmentBrowseQuery(query))

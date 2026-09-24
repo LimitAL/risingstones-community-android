@@ -462,6 +462,11 @@ private fun DutyRecruitmentDetailContent(
             ) {
                 Text(detail.summary.dutyName, style = MaterialTheme.typography.headlineSmall)
                 RecruitmentAuthorName(detail.summary.characterName, detail.summary.uuid)
+                RecruitmentRelayAction(
+                    detail.summary.id,
+                    RecruitmentBoardKind.Duty,
+                    detail.summary.dutyName,
+                )
                 Text("${detail.summary.areaName}/${detail.summary.groupName}",
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 RecruitmentChips(
@@ -522,6 +527,7 @@ private fun CommunityRecruitmentDetailContent(
             ) {
                 Text(detail.summary.title, style = MaterialTheme.typography.headlineSmall)
                 RecruitmentAuthorName(detail.summary.authorName, authors.selectedAuthorUuid)
+                RecruitmentRelayAction(detail.summary.id, state.board, detail.summary.title)
                 listOfNotNull(
                     detail.summary.sourceLocation,
                     detail.summary.targetLocation,

@@ -114,4 +114,5 @@
     <string name="recruitment_directory_wrong_parent">无法确认此条目属于当前跑团。</string>
     <string name="recruitment_image_link">打开图片链接</string>
     <string name="recruitment_open_author">查看社区个人主页</string>
+    <string name="recruitment_relay_dynamic">转发到动态</string>
 </resources>

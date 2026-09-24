@@ -114,4 +114,5 @@
     <string name="recruitment_directory_wrong_parent">This item could not be matched to the selected role-play recruitment.</string>
     <string name="recruitment_image_link">Open linked page</string>
     <string name="recruitment_open_author">View community profile</string>
+    <string name="recruitment_relay_dynamic">Share as update</string>
 </resources>
