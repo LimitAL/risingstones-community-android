@@ -102,4 +102,7 @@
     <string name="forum_mention_empty">No followed people are available for mentions.</string>
     <string name="forum_mention_no_match">No followed names match.</string>
     <string name="forum_mention_load_failed">Could not load people you follow.</string>
+    <string name="forum_relay_dynamic">Share as update</string>
+    <string name="forum_search_field_title">Search titles</string>
+    <string name="forum_search_field_body">Search content</string>
 </resources>

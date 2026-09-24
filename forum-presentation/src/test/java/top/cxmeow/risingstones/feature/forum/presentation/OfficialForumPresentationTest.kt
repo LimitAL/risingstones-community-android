@@ -31,6 +31,8 @@ import top.cxmeow.risingstones.feature.forum.domain.OfficialForumPostSummary
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumPostVote
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumPostVoteOption
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumSearchQuery
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumSearchField
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumTextSearchService
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumService
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumSubCommentQuery
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumVoteDraft
@@ -40,6 +42,137 @@ import java.time.Instant
 @OptIn(ExperimentalCoroutinesApi::class)
 class OfficialForumViewModelsTest {
     @get:Rule val mainDispatcherRule = MainDispatcherRule()
+
+    @Test fun fieldSelectionWaitsForSubmissionAndExistingSearchRestartsImmediately() = runTest {
+        val service = TextSearchService()
+        val model = OfficialForumListViewModel(service)
+        model.ensureLoaded()
+        advanceUntilIdle()
+        model.setSearchText("  topic  ")
+        model.setSearchField(OfficialForumSearchField.Body)
+        advanceUntilIdle()
+        assertTrue(model.searchState.value.available)
+        assertTrue(service.calls.isEmpty())
+        model.submitSearch()
+        advanceUntilIdle()
+        assertEquals("topic", service.calls.single().query.keywords)
+        assertEquals(OfficialForumSearchField.Body, service.calls.single().field)
+        model.setSearchField(OfficialForumSearchField.Title)
+        advanceUntilIdle()
+        assertEquals(2, service.calls.size)
+        assertEquals(OfficialForumSearchField.Title, service.calls.last().field)
+    }
+
+    @Test fun fieldChangeResetsPageCursorAndSelectionAndPaginationKeepsLoadedField() = runTest {
+        val service = TextSearchService()
+        val model = OfficialForumListViewModel(service)
+        model.setSearchText("topic")
+        model.submitSearch()
+        advanceUntilIdle()
+        model.loadMore()
+        advanceUntilIdle()
+        assertEquals(2, service.calls.last().query.page)
+        assertEquals("Title-1", service.calls.last().cursor)
+        model.selectPostId(100)
+        model.setSearchField(OfficialForumSearchField.Body)
+        assertTrue(model.state.value.posts.isEmpty())
+        assertEquals(null, model.state.value.selectedPostId)
+        advanceUntilIdle()
+        assertEquals(1, service.calls.last().query.page)
+        assertEquals(null, service.calls.last().cursor)
+        model.setSearchText("unsubmitted replacement")
+        model.loadMore()
+        advanceUntilIdle()
+        assertEquals("topic", service.calls.last().query.keywords)
+        assertEquals(OfficialForumSearchField.Body, service.calls.last().field)
+        assertEquals("Body-1", service.calls.last().cursor)
+        assertEquals(40, model.state.value.posts.size)
+    }
+
+    @Test fun fieldChangeDuringFirstSearchRejectsAnUncancellableOldResult() = runTest {
+        val waiting = CompletableDeferred<Unit>()
+        val service = TextSearchService().apply { delayedTitle = waiting }
+        val model = OfficialForumListViewModel(service)
+        model.setSearchText("topic")
+        model.submitSearch()
+        runCurrent()
+        model.setSearchField(OfficialForumSearchField.Body)
+        runCurrent()
+        waiting.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(OfficialForumSearchField.Body, model.searchState.value.field)
+        assertEquals(200, model.state.value.posts.first().id)
+        assertEquals(OfficialForumLoadStatus.Loaded, model.state.value.status)
+    }
+
+    @Test fun clearingFirstSearchRejectsAnUncancellableOldResult() = runTest {
+        val waiting = CompletableDeferred<Unit>()
+        val service = TextSearchService().apply { delayedTitle = waiting }
+        val model = OfficialForumListViewModel(service)
+        model.setSearchText("topic")
+        model.submitSearch()
+        runCurrent()
+        model.setSearchText("")
+        runCurrent()
+        waiting.complete(Unit)
+        advanceUntilIdle()
+        assertEquals("", model.state.value.loadedSearchText)
+        assertEquals(listOf(42), model.state.value.posts.map { it.id })
+    }
+
+    @Test fun failedBodyRefreshRetainsRowsAndSelectionAndRetriesTheSameField() = runTest {
+        val service = TextSearchService()
+        val model = OfficialForumListViewModel(service)
+        model.setSearchText("topic")
+        model.setSearchField(OfficialForumSearchField.Body)
+        model.submitSearch()
+        advanceUntilIdle()
+        model.selectPostId(200)
+        val rows = model.state.value.posts
+        service.fail = true
+        model.refresh()
+        advanceUntilIdle()
+        assertEquals(OfficialForumLoadStatus.Failed, model.state.value.status)
+        assertEquals(rows, model.state.value.posts)
+        assertEquals(200, model.state.value.selectedPostId)
+        service.fail = false
+        model.refresh()
+        advanceUntilIdle()
+        assertEquals(OfficialForumLoadStatus.Loaded, model.state.value.status)
+        assertEquals(OfficialForumSearchField.Body, service.calls.last().field)
+        assertEquals(1, service.calls.last().query.page)
+    }
+
+    @Test fun legacyServiceDoesNotAdvertiseOrAcceptUnsupportedBodySearch() = runTest {
+        val service = FakeOfficialForumService()
+        val model = OfficialForumListViewModel(service)
+        model.setSearchField(OfficialForumSearchField.Body)
+        model.setSearchText("topic")
+        model.submitSearch()
+        advanceUntilIdle()
+        assertFalse(model.searchState.value.available)
+        assertEquals(OfficialForumSearchField.Title, model.searchState.value.field)
+        assertEquals("topic", service.searchQueries.single().keywords)
+    }
+
+    @Test fun switchingContentKindResetsSearchAndFieldBeforeTheNextSubmission() = runTest {
+        val service = TextSearchService()
+        val model = OfficialForumListViewModel(service)
+        model.setSearchText("topic")
+        model.setSearchField(OfficialForumSearchField.Body)
+        model.submitSearch()
+        advanceUntilIdle()
+        model.setContentKind(OfficialForumContentKind.Guide)
+        advanceUntilIdle()
+        assertEquals("", model.state.value.searchText)
+        assertEquals(OfficialForumSearchField.Title, model.searchState.value.field)
+        assertEquals(1, service.calls.size)
+        model.setSearchText("guide")
+        model.submitSearch()
+        advanceUntilIdle()
+        assertEquals(OfficialForumContentKind.Guide, service.calls.last().query.contentKind)
+        assertEquals(OfficialForumSearchField.Title, service.calls.last().field)
+    }
 
     @Test
     fun guideCategoriesFilterByChildAndForwardPaginationCursor() = runTest {
@@ -252,6 +385,29 @@ class OfficialForumViewModelsTest {
             viewModel.state.value.subCommentsByRootId.getValue(9).single { it.id == 91 }
         assertTrue(likedNested.isLiked)
         assertEquals(nestedReply.likeCount + 1, likedNested.likeCount)
+    }
+}
+
+private class TextSearchService : OfficialForumService by FakeOfficialForumService(), OfficialForumTextSearchService {
+    data class Call(val query: OfficialForumSearchQuery, val field: OfficialForumSearchField, val cursor: String?)
+    val calls = mutableListOf<Call>()
+    var delayedTitle: CompletableDeferred<Unit>? = null
+    var fail = false
+    override suspend fun searchTextPage(
+        query: OfficialForumSearchQuery,
+        field: OfficialForumSearchField,
+        pageTime: String?,
+    ): OfficialForumBrowsePage {
+        calls += Call(query, field, pageTime)
+        if (field == OfficialForumSearchField.Title) delayedTitle?.let {
+            withContext(NonCancellable) { it.await() }
+        }
+        if (fail) error("Synthetic search failure")
+        val first = (if (field == OfficialForumSearchField.Title) 100 else 200) + (query.page - 1) * 20
+        return OfficialForumBrowsePage(
+            OfficialForumPage((first until first + 20).map { POST.copy(id = it) }, 60, query.page),
+            "$field-${query.page}",
+        )
     }
 }
 

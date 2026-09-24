@@ -10,6 +10,17 @@ interface OfficialForumBrowsingService : OfficialForumService {
     ): OfficialForumBrowsePage
 }
 
+enum class OfficialForumSearchField { Title, Body }
+
+/** Optional full-text search contract with the official title/body search dimensions. */
+interface OfficialForumTextSearchService {
+    suspend fun searchTextPage(
+        query: OfficialForumSearchQuery,
+        field: OfficialForumSearchField = OfficialForumSearchField.Title,
+        pageTime: String? = null,
+    ): OfficialForumBrowsePage
+}
+
 data class OfficialForumCategory(
     val part: OfficialForumPartFilter,
     val children: List<OfficialForumCategory> = emptyList(),

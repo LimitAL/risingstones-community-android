@@ -65,8 +65,10 @@ import top.cxmeow.risingstones.feature.forum.domain.OfficialForumPostSummary
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumPostVote
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumPostVoteOption
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumSearchQuery
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumSearchField
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumService
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumSubCommentQuery
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumTextSearchService
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumVoteDraft
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumVoteResult
 import java.net.URLEncoder
@@ -94,7 +96,7 @@ class OfficialForumApiService(
         sessionProvider as? OfficialForumIdentityConflictHandler,
     private val json: Json = Json { ignoreUnknownKeys = true; explicitNulls = false },
 ) : OfficialForumBrowsingService, OfficialForumInteractionService, OfficialForumCommentAuthoringService,
-    OfficialForumActionEligibilityService {
+    OfficialForumActionEligibilityService, OfficialForumTextSearchService {
     override val canPerformAuthenticatedWrites: Boolean
         get() = RisingStonesCapability.ForumWrite in sessionProvider?.capabilities.orEmpty()
     override val canUploadCommentImages: Boolean
@@ -164,13 +166,19 @@ class OfficialForumApiService(
     override suspend fun searchBrowsePage(
         query: OfficialForumSearchQuery,
         pageTime: String?,
+    ): OfficialForumBrowsePage = searchTextPage(query, OfficialForumSearchField.Title, pageTime)
+
+    override suspend fun searchTextPage(
+        query: OfficialForumSearchQuery,
+        field: OfficialForumSearchField,
+        pageTime: String?,
     ): OfficialForumBrowsePage {
         val page = query.page.coerceAtLeast(1)
         val limit = query.limit.coerceAtLeast(1)
         val response = get<PostListResponse>(
             "api/common/search",
             listOf(
-                query("type", query.contentKind.wireValue),
+                query("type", query.contentKind.searchType(field)),
                 query("keywords", query.keywords),
                 query("part_id", query.partIds.joinToString(",")),
                 query("orderBy", query.order.wireValue),
@@ -179,7 +187,12 @@ class OfficialForumApiService(
                 query("pageTime", pageTime?.takeIf { page > 1 }.orEmpty()),
                 query("tempsuid", temporarySessionId),
             ),
-        ).verified()
+            terminalCodes = setOf(SearchEmptyResultCode),
+        )
+        if (response.code == SearchEmptyResultCode) {
+            return OfficialForumBrowsePage(OfficialForumPage(emptyList(), 0, page), null)
+        }
+        response.verified()
         val payload = response.data ?: throw OfficialForumException.MissingPayload
         return OfficialForumBrowsePage(payload.page(page, limit), payload.pageTime.stringValue)
     }
@@ -509,11 +522,15 @@ class OfficialForumApiService(
     private suspend inline fun <reified T : ApiResponse> get(
         path: String,
         query: List<RisingStonesApiQueryItem>,
-    ): T = normalizeFinalAuthenticationFailure { getWithAuthentication<T>(path, query) }
+        terminalCodes: Set<Int> = emptySet(),
+    ): T = normalizeFinalAuthenticationFailure {
+        getWithAuthentication<T>(path, query, terminalCodes)
+    }
 
     private suspend inline fun <reified T : ApiResponse> getWithAuthentication(
         path: String,
         query: List<RisingStonesApiQueryItem>,
+        terminalCodes: Set<Int>,
     ): T {
         val initialAuthorizer = sessionProvider?.currentAuthorizer()
         val initialHeaders = initialAuthorizer.headers(
@@ -551,7 +568,10 @@ class OfficialForumApiService(
                         .body.decodeToString(),
                 )
             }
-        } else if (initialHeaders.isNotEmpty() && decoded.isAuthenticationFailure()) {
+        } else if (
+            initialHeaders.isNotEmpty() && decoded.code !in terminalCodes &&
+            decoded.isAuthenticationFailure()
+        ) {
             sessionProvider?.refreshAuthorizer()
                 .headers(path, RisingStonesAuthenticationRequirement.Optional)
                 .takeIf(Map<String, String>::isNotEmpty)
@@ -699,6 +719,7 @@ class OfficialForumApiService(
     private companion object {
         val temporarySessionId: String = UUID.randomUUID().toString()
         const val MaximumCommentImageBytes = 21 * 1024 * 1024
+        const val SearchEmptyResultCode = 10003
     }
 }
 
@@ -1221,3 +1242,14 @@ private fun inferredTotal(reported: Int?, rows: Int, page: Int, limit: Int): Int
     reported ?: ((page.coerceAtLeast(1) - 1) * limit.coerceAtLeast(1) + rows).let { loaded ->
         if (rows >= limit.coerceAtLeast(1)) loaded + 1 else loaded
     }
+
+private fun OfficialForumContentKind.searchType(field: OfficialForumSearchField): Int = when (this) {
+    OfficialForumContentKind.Post -> when (field) {
+        OfficialForumSearchField.Title -> 1
+        OfficialForumSearchField.Body -> 2
+    }
+    OfficialForumContentKind.Guide -> when (field) {
+        OfficialForumSearchField.Title -> 3
+        OfficialForumSearchField.Body -> 4
+    }
+}

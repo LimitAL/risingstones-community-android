@@ -4,5 +4,6 @@
             android:name="top.cxmeow.risingstones.feature.forum.ui.compose.ForumInteractionTestActivity"
             android:exported="false" />
         <activity android:name="top.cxmeow.risingstones.feature.forum.ui.compose.ForumCommentEditorTestActivity" android:exported="false" />
+        <activity android:name="top.cxmeow.risingstones.feature.forum.ui.compose.ForumTextSearchTestActivity" android:exported="false" />
     </application>
 </manifest>

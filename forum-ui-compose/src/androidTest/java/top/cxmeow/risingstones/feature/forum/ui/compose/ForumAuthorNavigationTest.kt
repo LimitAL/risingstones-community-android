@@ -120,6 +120,24 @@ class ForumAuthorNavigationTest {
         } }
         waitFor("Body text")
         author("post-uuid").assertHasNoClickAction()
+        compose.onNodeWithTag("forum-relay-post").assertDoesNotExist()
+    }
+
+    @Test fun relayUsesReadDetailIdentityWithoutForumWriteCapability() {
+        val fixture = AuthorForumFixture(canWrite = false)
+        var source: Pair<Int, String>? = null
+        compose.setContent { MaterialTheme {
+            RisingStonesForumRelayNavigation({ id, title -> source = id to title }) {
+                RisingStonesForumPostScreen(fixture, 42, {})
+            }
+        } }
+        waitFor("Body text")
+        compose.onNodeWithTag("forum-like-post").assertDoesNotExist()
+        compose.onNodeWithTag("forum-relay-post").performClick()
+        compose.runOnIdle {
+            assertEquals(42 to "Topic", source)
+            assertEquals(0, fixture.writes)
+        }
     }
 
     @Test fun blankUuidCannotNavigateEvenWhenCallbackIsAvailable() {
@@ -164,9 +182,9 @@ class ForumAuthorNavigationTest {
 }
 
 private class AuthorForumFixture(private val uuid: String = "post-uuid", private val count: Int = 1,
-    private val replyCount: Int = 1) :
+    private val replyCount: Int = 1, private val canWrite: Boolean = true) :
     OfficialForumService by FakeOfficialForumService {
-    override val canPerformAuthenticatedWrites = true
+    override val canPerformAuthenticatedWrites = canWrite
     var feedReads = 0
     var detailReads = 0
     var replyReads = 0

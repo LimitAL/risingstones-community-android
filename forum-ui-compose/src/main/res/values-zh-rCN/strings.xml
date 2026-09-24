@@ -102,4 +102,7 @@
     <string name="forum_mention_empty">没有可提及的已关注用户。</string>
     <string name="forum_mention_no_match">没有匹配的关注人姓名。</string>
     <string name="forum_mention_load_failed">无法加载你关注的人。</string>
+    <string name="forum_relay_dynamic">转发到动态</string>
+    <string name="forum_search_field_title">搜索标题</string>
+    <string name="forum_search_field_body">搜索正文</string>
 </resources>

@@ -84,6 +84,7 @@ import top.cxmeow.risingstones.feature.forum.domain.OfficialForumComment
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumCommentOrder
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumFeedFilter
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumSearchOrder
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumSearchField
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumContentKind
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumLinkParser
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumPostBodyBlock
@@ -307,6 +308,7 @@ fun RisingStonesForumScreen(
 }
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 private fun ForumListPane(
     state: OfficialForumListUiState,
     viewModel: OfficialForumListViewModel,
@@ -314,6 +316,7 @@ private fun ForumListPane(
     modifier: Modifier,
 ) {
     val browsing by viewModel.browsingState.collectAsStateWithLifecycle()
+    val textSearch by viewModel.searchState.collectAsStateWithLifecycle()
     Column(modifier) {
         Column(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -342,17 +345,31 @@ private fun ForumListPane(
             OutlinedTextField(
                 value = state.searchText,
                 onValueChange = viewModel::setSearchText,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().testTag("forum-search-input"),
                 label = { Text(stringResource(R.string.forum_search_hint)) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { viewModel.submitSearch() }),
                 trailingIcon = {
-                    TextButton(onClick = viewModel::submitSearch) {
+                    TextButton(onClick = viewModel::submitSearch,
+                        modifier = Modifier.testTag("forum-search-submit")) {
                         Text(stringResource(R.string.forum_search))
                     }
                 },
             )
+            if (textSearch.available && state.searchText.isNotBlank()) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OfficialForumSearchField.entries.forEach { field ->
+                        FilterChip(
+                            selected = textSearch.field == field,
+                            onClick = { viewModel.setSearchField(field) },
+                            modifier = Modifier.testTag("forum-search-field-${field.name}"),
+                            label = { Text(stringResource(if (field == OfficialForumSearchField.Title)
+                                R.string.forum_search_field_title else R.string.forum_search_field_body)) },
+                        )
+                    }
+                }
+            }
             if (state.loadedSearchText.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OfficialForumSearchOrder.entries.forEach { order ->
@@ -760,8 +777,8 @@ private fun ForumDetailContent(
         }
         item {
             ForumDetailHeader(detail)
-            if (viewModel.canInteract) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (viewModel.canInteract) {
                     TextButton(onClick = viewModel::likePost, enabled = !state.isLikingPost,
                         modifier = Modifier.testTag("forum-like-post")) {
                         Text(stringResource(if (detail.isLiked == true) R.string.forum_unlike_action
@@ -779,6 +796,7 @@ private fun ForumDetailContent(
                             else R.string.forum_write_comment))
                     }
                 }
+                ForumRelayAction(detail.id, detail.title)
             }
             interaction.actionError?.let { ForumInteractionErrorText(it) }
             if (state.status == OfficialForumLoadStatus.Failed) ForumRetry(

@@ -45,6 +45,8 @@ import top.cxmeow.risingstones.feature.forum.domain.OfficialForumPostSummary
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumPostVote
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumSearchOrder
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumSearchQuery
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumSearchField
+import top.cxmeow.risingstones.feature.forum.domain.OfficialForumTextSearchService
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumService
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumSubCommentQuery
 import top.cxmeow.risingstones.feature.forum.domain.OfficialForumVoteDraft
@@ -75,8 +77,18 @@ data class OfficialForumBrowsingUiState(
     val filter: OfficialForumFeedFilter = OfficialForumFeedFilter.Default,
 )
 
+/** Optional text-search selection; old list and browsing state constructors stay unchanged. */
+data class OfficialForumTextSearchUiState(
+    val available: Boolean = false,
+    val field: OfficialForumSearchField = OfficialForumSearchField.Title,
+)
+
 class OfficialForumListViewModel(private val service: OfficialForumService) : ViewModel() {
     private val browsingService = service as? OfficialForumBrowsingService
+    private val textSearchService = service as? OfficialForumTextSearchService
+    private val mutableSearchState = MutableStateFlow(
+        OfficialForumTextSearchUiState(available = textSearchService != null),
+    )
     private val mutableState = MutableStateFlow(OfficialForumListUiState())
     private val mutableBrowsingState = MutableStateFlow(
         OfficialForumBrowsingUiState(available = browsingService != null),
@@ -87,8 +99,11 @@ class OfficialForumListViewModel(private val service: OfficialForumService) : Vi
     private var generation = 0L
     private var pageTime: String? = null
     private var loadedQuery: OfficialForumListUiState? = null
+    private var loadedSearchField = OfficialForumSearchField.Title
+    private var hasRequestedSearch = false
     val state: StateFlow<OfficialForumListUiState> = mutableState.asStateFlow()
     val browsingState: StateFlow<OfficialForumBrowsingUiState> = mutableBrowsingState.asStateFlow()
+    val searchState: StateFlow<OfficialForumTextSearchUiState> = mutableSearchState.asStateFlow()
 
     fun ensureLoaded() {
         if (mutableState.value.status == OfficialForumLoadStatus.Idle) refresh()
@@ -96,6 +111,7 @@ class OfficialForumListViewModel(private val service: OfficialForumService) : Vi
 
     fun setContentKind(kind: OfficialForumContentKind) {
         if (mutableState.value.contentKind == kind) return
+        mutableSearchState.update { it.copy(field = OfficialForumSearchField.Title) }
         mutableState.update {
             it.copy(contentKind = kind, selectedPartIds = emptySet(), parts = emptyList(),
                 searchText = "", loadedSearchText = "")
@@ -108,7 +124,8 @@ class OfficialForumListViewModel(private val service: OfficialForumService) : Vi
     }
 
     fun setSearchText(value: String) {
-        val clearSearch = value.isBlank() && mutableState.value.loadedSearchText.isNotEmpty()
+        val clearSearch = value.isBlank() &&
+            (hasRequestedSearch || mutableState.value.loadedSearchText.isNotEmpty())
         mutableState.update { it.copy(searchText = value) }
         if (clearSearch) restart(clearContent = true)
     }
@@ -118,6 +135,12 @@ class OfficialForumListViewModel(private val service: OfficialForumService) : Vi
         if (normalized.isEmpty()) return
         mutableState.update { it.copy(searchText = normalized) }
         restart(clearContent = normalized != mutableState.value.loadedSearchText)
+    }
+
+    fun setSearchField(field: OfficialForumSearchField) {
+        if (textSearchService == null || mutableSearchState.value.field == field) return
+        mutableSearchState.update { it.copy(field = field) }
+        if (hasRequestedSearch) restart(clearContent = true)
     }
 
     fun applyFilters(partIds: Set<Int>, order: OfficialForumSearchOrder) {
@@ -175,14 +198,17 @@ class OfficialForumListViewModel(private val service: OfficialForumService) : Vi
         }
         val snapshot = mutableState.value
         val filter = mutableBrowsingState.value.filter
+        val searchField = mutableSearchState.value.field
+        hasRequestedSearch = snapshot.searchText.isNotBlank()
         refreshJob = viewModelScope.launch {
             coroutineScope {
                 val categories = launch { loadCategories(snapshot.contentKind, requestGeneration) }
                 try {
-                    val result = fetchPage(snapshot, snapshot.searchText.trim(), 1, null, filter)
+                    val result = fetchPage(snapshot, snapshot.searchText.trim(), 1, null, filter, searchField)
                     if (generation != requestGeneration) return@coroutineScope
                     pageTime = result.pageTime
                     loadedQuery = snapshot.copy(loadedSearchText = snapshot.searchText.trim())
+                    loadedSearchField = searchField
                     mutableState.update { current ->
                         current.copy(posts = result.page.items,
                             loadedSearchText = snapshot.searchText.trim(),
@@ -209,10 +235,11 @@ class OfficialForumListViewModel(private val service: OfficialForumService) : Vi
         val requestGeneration = generation
         val cursor = pageTime
         val filter = mutableBrowsingState.value.filter
+        val searchField = loadedSearchField
         mutableState.update { it.copy(isLoadingMore = true, loadMoreFailed = false) }
         pageJob = viewModelScope.launch {
             try {
-                val result = fetchPage(snapshot, snapshot.loadedSearchText, current.page + 1, cursor, filter)
+                val result = fetchPage(snapshot, snapshot.loadedSearchText, current.page + 1, cursor, filter, searchField)
                 if (generation != requestGeneration) return@launch
                 pageTime = result.pageTime ?: cursor
                 mutableState.update { latest ->
@@ -270,12 +297,14 @@ class OfficialForumListViewModel(private val service: OfficialForumService) : Vi
         page: Int,
         cursor: String?,
         filter: OfficialForumFeedFilter,
+        searchField: OfficialForumSearchField,
     ): OfficialForumBrowsePage {
         val parts = state.selectedPartIds.sorted()
         return if (search.isNotEmpty()) {
             val query = OfficialForumSearchQuery(state.contentKind, search, parts,
                 state.searchOrder, page, PageSize)
-            browsingService?.searchBrowsePage(query, cursor)
+            textSearchService?.searchTextPage(query, searchField, cursor)
+                ?: browsingService?.searchBrowsePage(query, cursor)
                 ?: OfficialForumBrowsePage(service.searchPosts(query), null)
         } else {
             val query = OfficialForumListQuery(state.contentKind, page, PageSize, parts)

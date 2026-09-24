@@ -108,7 +108,7 @@ class OfficialForumApiServiceTest {
         assertEquals("Topic", posts.items.single().title)
         assertEquals(listOf("https://cdn.test/cover.jpg"), posts.items.single().coverImageUrls)
         val searchUrl = transport.requests[2].url.toHttpUrl()
-        assertEquals("2", searchUrl.queryParameter("type"))
+        assertEquals("3", searchUrl.queryParameter("type"))
         assertEquals("  攻略  ", searchUrl.queryParameter("keywords"))
         assertEquals("comment", searchUrl.queryParameter("orderBy"))
         assertFalse(searchUrl.queryParameter("tempsuid").isNullOrBlank())
@@ -374,6 +374,39 @@ class OfficialForumApiServiceTest {
         assertThrows(OfficialForumException.AuthenticationRequired::class.java) {
             runBlocking { service(transport, provider).fetchPostDetail(42) }
         }
+        assertEquals(2, transport.requests.size)
+        assertEquals(1, provider.refreshes)
+        assertEquals(0, provider.resolutions)
+    }
+
+    @Test
+    fun searchTreatsEndpointSpecific10003AsTerminalEmptyWithoutCredentialRefresh() = runBlocking {
+        val transport = ForumResponseCodeTransport(OfficialForumTransport(), 10003)
+        val provider = ForumResponseCodeCredential()
+
+        val result = service(transport, provider).searchBrowsePage(
+            OfficialForumSearchQuery(OfficialForumContentKind.Post, "missing"),
+        )
+
+        assertTrue(result.page.items.isEmpty())
+        assertEquals(0, result.page.total)
+        assertEquals(1, result.page.page)
+        assertEquals(null, result.pageTime)
+        assertEquals(1, transport.requests.size)
+        assertEquals("fixture-paired-agent", transport.requests.single().headers["User-Agent"])
+        assertEquals(0, provider.refreshes)
+        assertEquals(0, provider.resolutions)
+    }
+
+    @Test
+    fun nonSearch10003KeepsExistingAuthenticationRecovery() {
+        val transport = ForumResponseCodeTransport(OfficialForumTransport(), 10003)
+        val provider = ForumResponseCodeCredential()
+
+        assertThrows(OfficialForumException.AuthenticationRequired::class.java) {
+            runBlocking { service(transport, provider).fetchParts() }
+        }
+
         assertEquals(2, transport.requests.size)
         assertEquals(1, provider.refreshes)
         assertEquals(0, provider.resolutions)

@@ -4,12 +4,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -121,16 +124,18 @@ class RisingStonesForumScreenTest {
 
     private fun showAtWidth(width: Dp) {
         composeRule.setContent {
-            MaterialTheme {
-                Box(
-                    Modifier
-                        .width(width)
-                        .height(1_000.dp),
-                ) {
-                    RisingStonesForumScreen(
-                        service = FakeOfficialForumService,
-                        onOpenAccount = {},
-                    )
+            CompositionLocalProvider(LocalDensity provides Density(1f)) {
+                MaterialTheme {
+                    Box(
+                        Modifier
+                            .width(width)
+                            .height(1_000.dp),
+                    ) {
+                        RisingStonesForumScreen(
+                            service = FakeOfficialForumService,
+                            onOpenAccount = {},
+                        )
+                    }
                 }
             }
         }
