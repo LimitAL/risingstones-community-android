@@ -399,6 +399,7 @@ private fun JsonObject.risingStonesCharacter(): RisingStonesCharacter? {
         areaName = stringValue("area_name", "areaName").orEmpty(),
         groupName = stringValue("group_name", "groupName").orEmpty(),
         characterName = name,
+        avatarUrl = stringValue("avatar"),
     )
 }
 

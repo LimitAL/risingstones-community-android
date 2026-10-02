@@ -82,6 +82,7 @@ class PersonalDataApiService(
     private val catalogProvider: PersonalDataCatalogProvider = EmptyPersonalDataCatalogProvider,
     private val json: Json = Json { ignoreUnknownKeys = true; explicitNulls = false },
     private val temporarySessionId: String = UUID.randomUUID().toString(),
+    private val cacheIdentityRead: suspend (suspend () -> PersonalDataIdentity) -> PersonalDataIdentity = { read -> read() },
 ) : PersonalDataPhantomWeaponService, PersonalDataDashboardService, PersonalDataFrontlineService,
     PersonalDataUltimateService, PersonalDataShareResourceService, PersonalDataNativeExplorationService {
     private val reader = PersonalDataRequestReader(risingStonesClient, sessionProvider, json, temporarySessionId)
@@ -157,12 +158,12 @@ class PersonalDataApiService(
     override val hasCommunityIdentity: Boolean
         get() = RisingStonesCapability.PersonalData in sessionProvider.capabilities
 
-    override suspend fun fetchIdentity(): PersonalDataIdentity {
+    override suspend fun fetchIdentity(): PersonalDataIdentity = cacheIdentityRead {
         val data = rising(
             "api/home/groupAndRole/getCharacterBindInfo",
             extraQuery = listOf(q("platform", 2)),
         ).obj("data") ?: throw PersonalDataException.MissingPayload
-        return PersonalDataIdentity(
+        PersonalDataIdentity(
             data.text("character_name", "characterName").orEmpty().trim().ifBlank { "—" },
             data.text("area_name", "areaName").orEmpty(),
             data.text("group_name", "groupName").orEmpty(),
