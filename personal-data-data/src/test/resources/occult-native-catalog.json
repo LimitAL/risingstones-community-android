@@ -1,0 +1,34 @@
+{
+        "key":"rising_stones.occult_catalog",
+        "version":2,
+        "schemaVersion":1,
+        "publishedAt":"2026-08-12T00:00:00.000Z",
+        "content":{
+          "schemaVersion":1,
+          "itemIconBaseUrl":"https://ff14-eo.web.sdo.com/ffstones/item/icon/dcsvv4fowz2m",
+          "supportJobs":[
+            {"id":0,"name":"辅助自由人","nameEnglish":"Phantom Freelancer","description":"精通职业统计","levelMax":0,"jobIndex":16,"iconId":82271},
+            {"id":1,"name":"辅助骑士","nameEnglish":"Phantom Paladin","description":"防护职业","levelMax":6,"jobIndex":1,"iconId":82272},
+            {"id":2,"name":"辅助狂战士","nameEnglish":"Phantom Berserker","description":"进攻职业","levelMax":3,"jobIndex":5,"iconId":82273}
+          ],
+          "itemDirectory":[
+            {"itemId":47979,"name":"瓣齿鲨笛","iconId":26039,"itemUICategoryId":63}
+          ],
+          "weaponStages":[
+            {"id":"penumbrae","name":"半影","order":1,"items":[{"itemId":47869,"name":"幻境利剑·半影","iconId":30694,"itemUICategoryId":2}]},
+            {"id":"umbrae","name":"本影","order":2,"items":[{"itemId":47006,"name":"幻境利剑·本影","iconId":30694,"itemUICategoryId":2}]},
+            {"id":"obscurum","name":"黯影","order":3,"items":[{"itemId":50032,"name":"幻境利剑·黯影","iconId":30699,"itemUICategoryId":2}]},
+            {"id":"eclipticum","name":"蚀影","order":4,"items":[{"itemId":50978,"name":"幻境利剑·蚀影","iconId":30704,"itemUICategoryId":2}]},
+            {"id":"occultum","name":"秘影","order":5,"items":[{"itemId":51000,"name":"幻境利剑·秘影","iconId":30704,"itemUICategoryId":2}]}
+          ],
+          "phaseResources":{
+            "penumbraeItems":[{"itemId":50802,"name":"青色半魂晶","iconId":26501,"itemUICategoryId":63}],
+            "halfSoulCrystalItemIds":[50802],
+            "eclipticumCrystals":[
+              {"itemId":50974,"name":"消幻晶α","iconId":26229,"itemUICategoryId":null},
+              {"itemId":50975,"name":"消幻晶β","iconId":26231,"itemUICategoryId":null},
+              {"itemId":50976,"name":"消幻晶γ","iconId":26230,"itemUICategoryId":null}
+            ]
+          }
+        }
+      }

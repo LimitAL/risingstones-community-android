@@ -57,6 +57,8 @@ import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataUltimateS
 import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataSupplementaryCatalogProvider
 import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataSupplementaryCatalogs
 import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataFishingRankingKind
+import top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataNativeExplorationService
+import top.cxmeow.risingstones.feature.personaldata.domain.ExplorationQuery
 import top.cxmeow.risingstones.feature.personaldata.domain.ExplorationBoard
 import top.cxmeow.risingstones.feature.personaldata.domain.ExplorationSectionKind
 import top.cxmeow.risingstones.feature.personaldata.domain.UltimateDashboard
@@ -81,9 +83,9 @@ class PersonalDataApiService(
     private val json: Json = Json { ignoreUnknownKeys = true; explicitNulls = false },
     private val temporarySessionId: String = UUID.randomUUID().toString(),
 ) : PersonalDataPhantomWeaponService, PersonalDataDashboardService, PersonalDataFrontlineService,
-    PersonalDataUltimateService, PersonalDataShareResourceService {
+    PersonalDataUltimateService, PersonalDataShareResourceService, PersonalDataNativeExplorationService {
     private val reader = PersonalDataRequestReader(risingStonesClient, sessionProvider, json, temporarySessionId)
-    private val exploration = ExplorationApiReader(risingStonesClient, sessionProvider, json)
+    private val exploration = ExplorationApiReader(risingStonesClient, sessionProvider, json, temporarySessionId)
     private val reading = PersonalDataReadingApiReader(reader)
     private val dashboard = PersonalDataDashboardApiReader(reader, reading)
     private val frontline = PersonalDataFrontlineApiReader(reader)
@@ -146,6 +148,12 @@ class PersonalDataApiService(
         board: ExplorationBoard,
         section: ExplorationSectionKind,
     ) = exploration.history(board, section)
+    override suspend fun fetchExplorationOverview(board: ExplorationBoard, query: ExplorationQuery) =
+        exploration.overview(board, query)
+
+    override suspend fun fetchExplorationHistory(board: ExplorationBoard, section: ExplorationSectionKind, query: ExplorationQuery) =
+        exploration.history(board, section, query)
+
     override val hasCommunityIdentity: Boolean
         get() = RisingStonesCapability.PersonalData in sessionProvider.capabilities
 

@@ -16,16 +16,27 @@ internal class ExplorationApiReader(
     private val client: RisingStonesPublicApiClient,
     private val session: RisingStonesSessionProvider,
     private val json: Json,
+    private val temporarySessionId: String,
 ) {
-    suspend fun overview(board: ExplorationBoard): ExplorationOverview = supervisorScope {
-        val availability = get("dataOpenStatus") as? JsonObject ?: throw ExplorationException.InvalidResponse
-        val key = if (board == ExplorationBoard.OccultCrescent) "mkd" else "page_a"
-        val available = availability.text(key)?.toIntOrNull() ?: throw ExplorationException.InvalidResponse
-        if (available != 1) return@supervisorScope ExplorationOverview(board, false, emptyList(), emptyList())
-        val definitions = if (board == ExplorationBoard.OccultCrescent) OccultDefinitions else DeepDefinitions
-        val tasks = definitions.map { definition -> async { readSection(definition) } }
+    suspend fun overview(board: ExplorationBoard, query: ExplorationQuery = ExplorationQuery()): ExplorationOverview = supervisorScope {
+        val native = query.profile == ExplorationQueryProfile.AstriaNative
+        // Apple has no verified Deep Dungeon status flag. Do not invent one for its Debug reader.
+        if (!(native && board == ExplorationBoard.DeepDungeon)) {
+            val availability = get("dataOpenStatus", nativeQuery(query), native) as? JsonObject ?: throw ExplorationException.InvalidResponse
+            val key = if (board == ExplorationBoard.OccultCrescent) "mkd" else "page_a"
+            val flag = availability.text(key)?.trim() ?: throw ExplorationException.InvalidResponse
+            val available = if (native) flag.isNotEmpty() && flag != "0"
+                else (flag.toIntOrNull() ?: throw ExplorationException.InvalidResponse) == 1
+            if (!available) return@supervisorScope ExplorationOverview(board, false, emptyList(), emptyList())
+        }
+        val definitions = when {
+            !native -> if (board == ExplorationBoard.OccultCrescent) OccultDefinitions else DeepDefinitions
+            board == ExplorationBoard.OccultCrescent -> OccultDefinitions.filter { it.kind in listOf(Overview, PhantomJobs, AcquiredItems, TreasureChests, Aether) }
+            else -> NativeDeepDefinitions
+        }
+        val tasks = definitions.map { definition -> async { readSection(definition, query) } }
         val sections = tasks.map { it.await() }.toMutableList()
-        if (board == ExplorationBoard.DeepDungeon) {
+        if (board == ExplorationBoard.DeepDungeon && !native) {
             // The official overview has both solo and party records. Keep their statistics separate.
             sections += jobSection(sections.first { it.kind == Challenges }, ChallengeJobs)
             sections += jobSection(sections.first { it.kind == SpecialBattle }, SpecialBattleJobs)
@@ -44,7 +55,7 @@ internal class ExplorationApiReader(
         ExplorationOverview(board, true, summary?.records?.firstOrNull()?.fields.orEmpty(), sections)
     }
 
-    suspend fun history(board: ExplorationBoard, kind: ExplorationSectionKind): ExplorationSection {
+    suspend fun history(board: ExplorationBoard, kind: ExplorationSectionKind, query: ExplorationQuery = ExplorationQuery()): ExplorationSection {
         val definition = when (board) {
             ExplorationBoard.OccultCrescent -> when (kind) {
                 TreasureHistory -> Definition(kind, "getMKDIHistory6", HistoryFields, listOf(q("catalog_type", "稀有道具")))
@@ -53,15 +64,18 @@ internal class ExplorationApiReader(
             }
             ExplorationBoard.DeepDungeon -> when (kind) {
                 TreasureHistory, ItemHistory -> Definition(kind, "getDDHistory4", HistoryFields,
-                    DeepQuery + q("catalog_type", if (kind == TreasureHistory) "treasure" else "item"))
+                    if (query.profile == ExplorationQueryProfile.AstriaNative) emptyList()
+                    else DeepQuery + q("catalog_type", if (kind == TreasureHistory) "treasure" else "item"))
                 else -> throw ExplorationException.Unavailable
             }
         }
-        return readSection(definition)
+        return readSection(definition, query)
     }
 
-    private suspend fun readSection(definition: Definition): ExplorationSection = try {
-        val data = get(definition.path, definition.query) as? JsonArray ?: throw ExplorationException.InvalidResponse
+    private suspend fun readSection(definition: Definition, query: ExplorationQuery): ExplorationSection = try {
+        val native = query.profile == ExplorationQueryProfile.AstriaNative
+        val raw = get(definition.path, if (native) nativeQuery(query, definition.path, definition.query) else definition.query, native)
+        val data = if (native) nativeRows(raw) else raw as? JsonArray ?: throw ExplorationException.InvalidResponse
         val records = data.mapIndexed { index, element ->
             requireAccess()
             val row = element as? JsonObject ?: throw ExplorationException.InvalidResponse
@@ -70,12 +84,13 @@ internal class ExplorationApiReader(
             } }.distinctBy { it.kind }
             val itemId = row.text("catalog_id")?.toIntOrNull()
             val achievementId = row.text("achieve_id")?.toIntOrNull()
-            if (fields.isEmpty() && itemId == null && achievementId == null) throw ExplorationException.InvalidResponse
-            ExplorationRecord("${definition.kind}-$index", row.text("catalog_name", "achieve_name")
+            val details = if (native) nativeDetailFields(row) else emptyList()
+            if (fields.isEmpty() && details.isEmpty() && itemId == null && achievementId == null) throw ExplorationException.InvalidResponse
+            ExplorationRecord("${definition.kind}-$index", (if (native) row.text("name", "title", "label", "job_name", "territory_name", "fish_name", "item_name", "map_name", "achievement_name", "log_time", "catalog_name", "achieve_name") else row.text("catalog_name", "achieve_name"))
                 ?.takeIf(String::isNotBlank) ?: itemId?.let { OfficialExplorationItems.names[it] }.orEmpty(), fields,
-                itemId, achievementId)
+                itemId, achievementId, detailFields = details)
         }.toMutableList()
-        if (definition.kind == PhantomJobs) {
+        if (definition.kind == PhantomJobs && !native) {
             val mastered = records.distinctBy { it.value(PhantomJob) }.count { record ->
                 val id = record.value(PhantomJob)?.toIntOrNull()
                 val level = record.value(Level)?.toIntOrNull()
@@ -85,7 +100,7 @@ internal class ExplorationApiReader(
             records.add(0, ExplorationRecord("freelancer", "", listOf(ExplorationField(PhantomJob, "0"),
                 ExplorationField(Level, mastered.toString()))))
         }
-        if (definition.kind in listOf(Challenges, SpecialBattle)) {
+        if (!native && definition.kind in listOf(Challenges, SpecialBattle)) {
             // Expand only the documented job:count pairs. No raw composite field reaches presentation.
             data.forEachIndexed { index, element ->
                 val row = element as JsonObject
@@ -99,7 +114,7 @@ internal class ExplorationApiReader(
                 }
             }
         }
-        if (definition.kind == Challenges) {
+        if (definition.kind == Challenges && !native) {
             data.forEachIndexed { index, element ->
                 val row = element as JsonObject
                 row.text("annihilation_num").orEmpty().split(',').forEach { pair ->
@@ -130,16 +145,16 @@ internal class ExplorationApiReader(
         }
     }
 
-    private suspend fun get(endpoint: String, query: List<RisingStonesApiQueryItem> = emptyList()): JsonElement {
+    private suspend fun get(endpoint: String, query: List<RisingStonesApiQueryItem> = emptyList(), native: Boolean = false): JsonElement {
         requireAccess()
         return try {
             val authorizer = session.currentAuthorizer() ?: throw ExplorationException.AuthenticationRequired
             requireAccess()
-            try { request(authorizer, endpoint, query) } catch (_: ExplorationException.AuthenticationRequired) {
+            try { request(authorizer, endpoint, query, native) } catch (_: ExplorationException.AuthenticationRequired) {
                 requireAccess()
                 val refreshed = session.refreshAuthorizer() ?: throw ExplorationException.AuthenticationRequired
                 requireAccess()
-                request(refreshed, endpoint, query)
+                request(refreshed, endpoint, query, native)
             }
         } catch (error: CancellationException) { throw error
         } catch (error: ExplorationException) { requireAccess(); throw error
@@ -147,7 +162,7 @@ internal class ExplorationApiReader(
     }
 
     private suspend fun request(authorizer: RisingStonesRequestAuthorizer, endpoint: String,
-        query: List<RisingStonesApiQueryItem>): JsonElement {
+        query: List<RisingStonesApiQueryItem>, native: Boolean): JsonElement {
         requireAccess()
         val path = "api/home/dataCenter/$endpoint"
         val headers = linkedMapOf<String, String>()
@@ -170,12 +185,22 @@ internal class ExplorationApiReader(
         } catch (_: IllegalArgumentException) { null } ?: throw ExplorationException.InvalidResponse
         val code = root.text("code")?.toIntOrNull()
         if (RisingStonesResponsePolicy.accepts(code)) {
-            return root["data"]?.takeUnless { it is JsonNull } ?: throw ExplorationException.InvalidResponse
+            return if (native) root["data"] ?: JsonNull
+            else root["data"]?.takeUnless { it is JsonNull } ?: throw ExplorationException.InvalidResponse
         }
         when (code) {
             10001, 10403, 10105 -> throw ExplorationException.AuthenticationRequired
             null -> throw ExplorationException.InvalidResponse
             else -> throw ExplorationException.Business(code)
+        }
+    }
+
+    private fun nativeQuery(query: ExplorationQuery, endpoint: String = "", additional: List<RisingStonesApiQueryItem> = emptyList()): List<RisingStonesApiQueryItem> {
+        if (query.profile != ExplorationQueryProfile.AstriaNative) return emptyList()
+        return buildList {
+            if (endpoint.startsWith("getDD")) add(q("dd_type", query.deepDungeonType.wireValue))
+            addAll(additional.filterNot { it.name in listOf("dd_type", "territory_type", "tempsuid") })
+            add(q("tempsuid", temporarySessionId))
         }
     }
 
@@ -225,3 +250,35 @@ private val DeepDefinitions = listOf(
     Definition(FirstClearTeam, "getDDFirstTeam7", listOf("character_name" to CharacterName,
         "area_name" to Area, "group_name" to World, "job_name" to ClassJob), SpecialQuery),
 )
+
+// The native Debug contract uses dd_type for every DD endpoint, and has no verified territory filter.
+private val NativeDeepDefinitions = listOf(
+    Definition(Overview, "getDDTerr1", listOf("clear_times" to Clears, "clearTimes" to Clears,
+        "total_clear_time" to Clears, "weapon_level" to WeaponLevel, "armor_level" to ArmorLevel,
+        "enchanted_level" to EnchantedLevel, "enchantedLevel" to EnchantedLevel)),
+    Definition(SpecialBattle, "getDDGaoNan2", DeepDefinitions.first { it.kind == SpecialBattle }.fields),
+    Definition(AcquiredItems, "getDDItem3", ItemFields),
+    Definition(ItemHistory, "getDDHistory4", HistoryFields),
+    Definition(Achievements, "getDDAchieve5", AchievementFields),
+    Definition(DeathLocations, "getDDDeadPoint6", listOf("point_x" to X, "point_y" to Y)),
+    Definition(FirstClearTeam, "getDDFirstTeam7", DeepDefinitions.first { it.kind == FirstClearTeam }.fields),
+)
+private fun nativeRows(raw: JsonElement): JsonArray = when (raw) {
+    is JsonArray -> raw
+    is JsonObject -> listOf("rows", "list", "data").firstNotNullOfOrNull { raw[it] as? JsonArray } ?: JsonArray(listOf(raw))
+    JsonNull -> JsonArray(emptyList())
+    else -> throw ExplorationException.InvalidResponse
+}
+
+private val NativeIgnoredFieldKeys = setOf("character_id", "characterId", "uid", "user_id", "userId", "role_id", "roleId", "tempsuid")
+private fun nativeDetailFields(row: JsonObject): List<ExplorationDetailField> {
+    fun flatten(value: JsonElement, prefix: String): List<ExplorationDetailField> = when (value) {
+        is JsonObject -> value.keys.sorted().filterNot { it in NativeIgnoredFieldKeys }.flatMap { key ->
+            flatten(value.getValue(key), if (prefix.isEmpty()) key else "$prefix.$key")
+        }
+        is JsonArray -> value.flatMapIndexed { index, element -> flatten(element, "$prefix[$index]") }
+        is JsonPrimitive -> if (value is JsonNull) emptyList() else value.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+            ?.let { listOf(ExplorationDetailField(prefix, it)) }.orEmpty()
+    }
+    return flatten(row, "").sortedWith(compareBy<ExplorationDetailField> { it.key != "log_time" }.thenBy { it.key })
+}
