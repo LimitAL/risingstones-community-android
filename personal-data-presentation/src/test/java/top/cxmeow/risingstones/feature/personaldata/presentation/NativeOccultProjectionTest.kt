@@ -14,6 +14,13 @@ class NativeOccultProjectionTest {
         listOf("penumbrae", "umbrae", "obscurum", "eclipticum", "occultum").zip(listOf(47869, 47006, 50032, 50978, 51000)).mapIndexed { index, (stage, id) ->
             OccultWeaponStage(stage, stage, index + 1, listOf(OccultCatalogItem(id, stage, 30694)))
         }, OccultPhaseResources(listOf(soul), listOf(soul.itemId), crystals))
+    @Test fun historyKeepsApiNamesWhenAnonymousCatalogIsUnavailable() {
+        val history = section(TreasureHistory, row("rare", 47979, ItemName to "API rare name", RecordedAt to "2026-10-01"))
+        val result = NativeOccultProjection.history(null, history).single()
+        assertEquals("API rare name", result.name)
+        assertNull(result.iconId)
+        assertEquals("2026-10-01", result.logTime)
+    }
     @Test fun jobsUseMaximumDuplicateLevelsAndCatalogCapsIncludingFreelancer() {
         val section = section(PhantomJobs, row("a", null, PhantomJob to "1", Level to "2"), row("b", null, PhantomJob to "1", Level to "8"), row("c", null, PhantomJob to "0", Level to "999"))
         val result = NativeOccultProjection.jobs(catalog, section)

@@ -41,8 +41,8 @@ object NativeOccultProjection {
         return catalog.itemDirectory.map { NativeOccultDrop(it, counts[it.itemId] ?: 0, section.hasSnapshot()) }
             .sortedWith(compareByDescending<NativeOccultDrop> { it.count }.thenBy { it.item.itemId })
     }
-    fun history(catalog: OccultCatalog, section: ExplorationSection?): List<NativeOccultHistoryRecord> {
-        val items = catalog.itemDirectory.associateBy { it.itemId }
+    fun history(catalog: OccultCatalog?, section: ExplorationSection?): List<NativeOccultHistoryRecord> {
+        val items = catalog?.itemDirectory.orEmpty().associateBy { it.itemId }
         return section?.records.orEmpty().mapNotNull { record ->
             val item = record.itemId?.let { items[it] }
             val name = record.field(ItemName) ?: item?.name ?: record.title.takeIf { it.isNotBlank() } ?: return@mapNotNull null
@@ -107,7 +107,7 @@ object NativeOccultProjection {
     }.groupBy({ it.first }, { it.second }).mapValues { it.value.max() }
 }
 private fun ExplorationRecord.field(kind: ExplorationFieldKind) = fields.firstOrNull { it.kind == kind }?.value
-private fun ExplorationSection?.hasSnapshot() = this != null && failure == null
+private fun ExplorationSection?.hasSnapshot() = this != null && hasSnapshot
 private fun String?.count() = this?.toLongOrNull() ?: 0L
 private fun Long.plusCount(value: Long) = if (Long.MAX_VALUE - this < value) Long.MAX_VALUE else this + value
 data class NativeOccultJob(val job: OccultSupportJob, val currentLevel: Long?, val hasSnapshot: Boolean) {

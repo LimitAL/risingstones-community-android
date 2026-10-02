@@ -26,15 +26,17 @@ data class ExplorationUiState(
     val error: ExplorationError? = null,
 ) {
     val section: ExplorationSection?
-        get() = if (selectedSection.isHistory) histories[selectedSection]
-        else overview?.sections?.firstOrNull { it.kind == selectedSection }
+        get() = histories[selectedSection] ?: overview?.sections?.firstOrNull { it.kind == selectedSection }
 }
 
 class ExplorationViewModel(
     private val service: PersonalDataExplorationService,
     private val board: ExplorationBoard,
+    private val sectionKinds: List<ExplorationSectionKind> = board.sections(),
 ) : ViewModel() {
-    private val mutableState = MutableStateFlow(ExplorationUiState(board))
+    init { require(sectionKinds.isNotEmpty() && sectionKinds.distinct().size == sectionKinds.size) }
+    private fun emptyState() = ExplorationUiState(board, selectedSection = sectionKinds.first())
+    private val mutableState = MutableStateFlow(emptyState())
     val state: StateFlow<ExplorationUiState> = mutableState.asStateFlow()
     private val mutablePhantomWeapons = MutableStateFlow(PhantomWeaponUiState())
     val phantomWeapons: StateFlow<PhantomWeaponUiState> = mutablePhantomWeapons.asStateFlow()
@@ -57,14 +59,14 @@ class ExplorationViewModel(
     }
 
     fun selectSection(kind: ExplorationSectionKind) {
-        if (!requireIdentity() || kind !in board.sections() || state.value.overview?.available != true) return
+        if (!requireIdentity() || kind !in sectionKinds || state.value.overview?.available != true) return
         phantomParentSection = null
         mutablePhantomWeapons.value = phantomWeapons.value.copy(isOpen = false, returnFromHistory = false)
         if (kind != state.value.selectedSection) {
             cancelHistory()
             mutableState.value = state.value.copy(selectedSection = kind, error = null)
         }
-        if (kind.isHistory && kind !in state.value.histories) loadHistory(kind)
+        if (kind.isHistory && kind !in state.value.histories && state.value.overview?.sections?.none { it.kind == kind && it.failure == null } != false) loadHistory(kind)
     }
 
     fun refresh() {
@@ -91,12 +93,14 @@ class ExplorationViewModel(
                 if (result.board != board) throw ExplorationException.InvalidResponse
                 if (!result.available) {
                     clearProtectedContent()
-                    mutableState.value = ExplorationUiState(board, overview = result)
+                    mutableState.value = emptyState().copy(overview = result)
                 } else {
                     val previous = state.value.overview
                     val sections = result.sections.map { section ->
-                        if (section.failure == null) section else section.copy(records = previous?.sections
-                            ?.firstOrNull { it.kind == section.kind }?.records.orEmpty())
+                        if (section.failure == null) section else {
+                            val retained = previous?.sections?.firstOrNull { it.kind == section.kind }
+                            section.copy(records = retained?.records.orEmpty(), hasSnapshot = retained?.hasSnapshot == true)
+                        }
                     }
                     mutableState.value = state.value.copy(overview = result.copy(sections = sections,
                         metrics = sections.firstOrNull { it.kind == ExplorationSectionKind.Overview }
@@ -148,7 +152,7 @@ class ExplorationViewModel(
                 currentCoroutineContext().ensureActive()
                 if (generation != historyGeneration || !requireIdentity()) return@launch
                 if (result.kind != kind) throw ExplorationException.InvalidResponse
-                val merged = if (result.failure == null) result else result.copy(records = state.value.histories[kind]?.records.orEmpty())
+                val merged = if (result.failure == null) result else result.copy(records = state.value.histories[kind]?.records.orEmpty(), hasSnapshot = state.value.histories[kind]?.hasSnapshot == true)
                 mutableState.value = state.value.copy(histories = state.value.histories + (kind to merged), isLoadingHistory = false)
             } catch (error: CancellationException) { throw error
             } catch (error: Exception) {
@@ -202,7 +206,7 @@ class ExplorationViewModel(
     fun returnToPhantomWeapons(): Boolean {
         if (!requireIdentity() || !phantomWeapons.value.returnFromHistory || state.value.overview?.available != true) return false
         cancelHistory()
-        mutableState.value = state.value.copy(selectedSection = phantomParentSection ?: board.sections().first(), error = null)
+        mutableState.value = state.value.copy(selectedSection = phantomParentSection ?: sectionKinds.first(), error = null)
         mutablePhantomWeapons.value = phantomWeapons.value.copy(isOpen = true, returnFromHistory = false)
         return true
     }
@@ -257,7 +261,7 @@ class ExplorationViewModel(
         overviewJob?.cancel(); overviewJob = null
         catalogJob?.cancel(); catalogJob = null
         cancelHistory()
-        mutableState.value = ExplorationUiState(board, error = ExplorationError.Unavailable)
+        mutableState.value = emptyState().copy(error = ExplorationError.Unavailable)
         mutablePhantomWeapons.value = PhantomWeaponUiState(contentGeneration = contentGeneration)
     }
 
@@ -308,10 +312,10 @@ private fun failureReason(error: Exception): ExplorationError = when (error) {
     else -> ExplorationError.Network
 }
 
-class ExplorationViewModelFactory(private val service: PersonalDataExplorationService, private val board: ExplorationBoard) : ViewModelProvider.Factory {
+class ExplorationViewModelFactory(private val service: PersonalDataExplorationService, private val board: ExplorationBoard, private val sectionKinds: List<ExplorationSectionKind> = board.sections()) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         require(modelClass.isAssignableFrom(ExplorationViewModel::class.java))
-        return ExplorationViewModel(service, board) as T
+        return ExplorationViewModel(service, board, sectionKinds) as T
     }
 }

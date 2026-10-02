@@ -29,6 +29,8 @@ data class ExplorationSection(
     val kind: ExplorationSectionKind,
     val records: List<ExplorationRecord> = emptyList(),
     val failure: ExplorationFailure? = null,
+    /** True even after a refresh failure when a previous successful (possibly empty) snapshot survives. */
+    val hasSnapshot: Boolean = failure == null,
 )
 data class ExplorationOverview(
     val board: ExplorationBoard,
