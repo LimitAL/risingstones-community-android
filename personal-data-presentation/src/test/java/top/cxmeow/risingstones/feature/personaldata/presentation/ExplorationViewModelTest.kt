@@ -12,6 +12,41 @@ import top.cxmeow.risingstones.feature.personaldata.domain.ExplorationSectionKin
 class ExplorationViewModelTest {
     @get:Rule val dispatcher = MainDispatcherRule()
 
+    @Test fun nativeSectionsUseOverviewAndReuseBatchedHistoryWhileWebDefaultsRemain() = runTest {
+        val service = ExplorationFixtureService().apply {
+            overview = { fixtureOverview().copy(board = ExplorationBoard.DeepDungeon, sections = listOf(
+                ExplorationSection(Overview), ExplorationSection(ItemHistory, listOf(record("batch"))))) }
+        }
+        val native = ExplorationViewModel(service, ExplorationBoard.DeepDungeon, listOf(Overview, ItemHistory))
+        advanceUntilIdle()
+        assertEquals(Overview, native.state.value.selectedSection)
+        native.selectSection(ItemHistory)
+        assertEquals("batch", native.state.value.section?.records?.single()?.title)
+        assertTrue(service.historyCalls.isEmpty())
+        native.selectSection(Challenges)
+        assertEquals(ItemHistory, native.state.value.selectedSection)
+        val web = ExplorationViewModel(service, ExplorationBoard.DeepDungeon)
+        assertEquals(Challenges, web.state.value.selectedSection)
+        advanceUntilIdle()
+    }
+
+    @Test fun failedRefreshRetainsConfirmedEmptySnapshotButInitialFailureIsUnknown() = runTest {
+        val service = ExplorationFixtureService().apply {
+            overview = { fixtureOverview().copy(sections = listOf(ExplorationSection(Overview), ExplorationSection(Aether, failure = ExplorationFailure.Network))) }
+        }
+        val model = ExplorationViewModel(service, ExplorationBoard.OccultCrescent)
+        advanceUntilIdle()
+        assertTrue(model.state.value.section!!.hasSnapshot)
+        model.selectSection(Aether)
+        assertFalse(model.state.value.section!!.hasSnapshot)
+        service.overview = { fixtureOverview().copy(sections = listOf(ExplorationSection(Overview, failure = ExplorationFailure.Network), ExplorationSection(Aether, failure = ExplorationFailure.Network))) }
+        model.refresh(); advanceUntilIdle()
+        model.selectSection(Overview)
+        assertTrue(model.state.value.section!!.hasSnapshot)
+        assertTrue(model.state.value.section!!.records.isEmpty())
+        assertEquals(ExplorationFailure.Network, model.state.value.section!!.failure)
+    }
+
     @Test fun historyIsExplicitAndCachedAndSelectionSurvivesOverviewRefresh() = runTest {
         val service = ExplorationFixtureService()
         val model = ExplorationViewModel(service, ExplorationBoard.OccultCrescent)

@@ -4,6 +4,7 @@ data class RisingStonesCharacter(
     val areaName: String,
     val groupName: String,
     val characterName: String,
+    val avatarUrl: String? = null,
 )
 
 enum class RisingStonesRewardStatus {

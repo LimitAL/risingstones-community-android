@@ -9,10 +9,12 @@ enum class ExplorationSectionKind {
 enum class ExplorationFieldKind {
     KnowledgeLevel, Fates, CriticalEncounters, SilverCoins, GoldCoins, WhiteSilverCoins, WhiteGoldCoins,
     PhantomJob, Level, Quantity, ItemName, ItemCategory, FirstAcquiredAt, Uses, BoxType, BoxGrade,
-    AetherColor, AetherPoints, AchievementName, RecordedAt, Solo, WeaponLevel, ArmorLevel, Clears,
+    AetherColor, AetherPoints, AchievementName, RecordedAt, Solo, WeaponLevel, ArmorLevel, EnchantedLevel, Clears,
     FirstClearAt, ClearDuration, Attempts, Deaths, Wipes, ClassJob, CharacterName, World, Area, Floor, X, Y,
 }
 data class ExplorationField(val kind: ExplorationFieldKind, val value: String)
+/** Native Debug details retain public source fields after recursive identity redaction in data. */
+data class ExplorationDetailField(val key: String, val value: String)
 data class ExplorationRecord(
     val key: String,
     val title: String,
@@ -20,12 +22,15 @@ data class ExplorationRecord(
     val itemId: Int? = null,
     val achievementId: Int? = null,
     val territoryId: Int? = null,
+    val detailFields: List<ExplorationDetailField> = emptyList(),
 )
 enum class ExplorationFailure { Network, InvalidResponse, Business }
 data class ExplorationSection(
     val kind: ExplorationSectionKind,
     val records: List<ExplorationRecord> = emptyList(),
     val failure: ExplorationFailure? = null,
+    /** True even after a refresh failure when a previous successful (possibly empty) snapshot survives. */
+    val hasSnapshot: Boolean = failure == null,
 )
 data class ExplorationOverview(
     val board: ExplorationBoard,

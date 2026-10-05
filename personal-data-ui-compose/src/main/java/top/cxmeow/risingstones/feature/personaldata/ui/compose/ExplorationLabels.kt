@@ -46,6 +46,7 @@ internal fun ExplorationFieldKind.label(): Int = when (this) {
     ExplorationFieldKind.Solo -> R.string.exploration_solo
     ExplorationFieldKind.WeaponLevel -> R.string.exploration_weaponlevel
     ExplorationFieldKind.ArmorLevel -> R.string.exploration_armorlevel
+    ExplorationFieldKind.EnchantedLevel -> R.string.exploration_enchantedlevel
     ExplorationFieldKind.Clears -> R.string.exploration_clears
     ExplorationFieldKind.FirstClearAt -> R.string.exploration_firstclearat
     ExplorationFieldKind.ClearDuration -> R.string.exploration_clearduration
