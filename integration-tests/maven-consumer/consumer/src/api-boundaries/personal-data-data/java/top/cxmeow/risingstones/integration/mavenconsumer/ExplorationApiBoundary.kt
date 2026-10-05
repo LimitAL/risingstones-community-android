@@ -115,3 +115,29 @@ suspend fun readPublishedShareCatalog(client: RisingStonesPublicApiClient, sessi
     service.shareImageUrl(PersonalDataShareImage.PhantomJobIcon(82271))
     return top.cxmeow.risingstones.feature.personaldata.data.BundledPersonalDataShareCatalogProvider().fetchShareCatalogs()
 }
+
+suspend fun readPublishedNativeExploration(
+    client: RisingStonesPublicApiClient,
+    session: RisingStonesSessionProvider,
+): Pair<ExplorationOverview, ExplorationSection> {
+    val service: PersonalDataNativeExplorationService = PersonalDataApiService(
+        client, session, cacheIdentityRead = { read -> read() },
+    )
+    val query = ExplorationQuery(ExplorationQueryProfile.AstriaNative, DeepDungeonType.DD1)
+    return service.fetchExplorationOverview(ExplorationBoard.DeepDungeon, query) to
+        service.fetchExplorationHistory(ExplorationBoard.DeepDungeon, ExplorationSectionKind.TreasureHistory, query)
+}
+
+fun decodePublishedNativeCatalog(bytes: ByteArray): OccultCatalog =
+    top.cxmeow.risingstones.feature.personaldata.data.OccultCatalogJsonDecoder().decode(bytes)
+
+suspend fun readPublishedNativeCatalog(service: OccultCatalogService): OccultCatalog =
+    service.fetchCatalog()
+
+fun publishedNativeItemIcon(iconId: Int): String? =
+    top.cxmeow.risingstones.feature.personaldata.data.occultGameItemIconUrl(iconId)
+
+fun publishedNativeStaticIcon(iconId: Int): String? =
+    top.cxmeow.risingstones.feature.personaldata.data.occultStaticIconUrl(
+        iconId, top.cxmeow.risingstones.feature.personaldata.data.OccultStaticIconKind.SupportJob,
+    )

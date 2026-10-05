@@ -25,7 +25,8 @@ bash scripts/verify-public-source-safety.sh
 
 ## 本地环境
 
-工程要求 JDK 21 和 Android SDK 36，是完全独立的 Gradle 工程。不要加入本机绝对路径、
+Gradle 守护进程要求 JDK 25（由 `gradle/gradle-daemon-jvm.properties` 固定）和 Android SDK 36，
+是完全独立的 Gradle 工程。运行验证前先用 `java -version` 确认本机版本。不要加入本机绝对路径、
 私有 Maven 仓库或包含秘密信息的配置文件。
 
 基础验证：

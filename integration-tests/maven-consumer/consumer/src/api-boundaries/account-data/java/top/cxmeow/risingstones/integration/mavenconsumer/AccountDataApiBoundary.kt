@@ -21,3 +21,7 @@ fun accountActionVerificationFromPublishedArtifact(
     provider: RisingStonesSessionProvider,
 ): top.cxmeow.risingstones.feature.account.domain.RisingStonesAccountActionVerificationService =
     RisingStonesAccountApiService(client, provider)
+
+fun characterAvatarFromPublishedArtifact(
+    character: top.cxmeow.risingstones.feature.account.domain.RisingStonesCharacter,
+): String? = character.avatarUrl

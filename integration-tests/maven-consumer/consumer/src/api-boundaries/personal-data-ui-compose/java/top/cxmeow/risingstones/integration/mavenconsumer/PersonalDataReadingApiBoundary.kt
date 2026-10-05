@@ -183,6 +183,21 @@ fun publishedShareRenderer(context: android.content.Context,
     top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataShareRenderer =
     top.cxmeow.risingstones.feature.personaldata.ui.compose.AndroidPersonalDataShareRenderer(context, resources)
 
+fun publishedNativeExplorationFactory(
+    service: top.cxmeow.risingstones.feature.personaldata.domain.PersonalDataExplorationService,
+) = top.cxmeow.risingstones.feature.personaldata.presentation.ExplorationViewModelFactory(
+    service,
+    top.cxmeow.risingstones.feature.personaldata.domain.ExplorationBoard.OccultCrescent,
+    listOf(top.cxmeow.risingstones.feature.personaldata.domain.ExplorationSectionKind.PhantomJobs),
+)
+
+fun publishedNativeWeaponProjection(
+    catalog: top.cxmeow.risingstones.feature.personaldata.domain.OccultCatalog,
+    items: top.cxmeow.risingstones.feature.personaldata.domain.ExplorationSection?,
+    aether: top.cxmeow.risingstones.feature.personaldata.domain.ExplorationSection?,
+): top.cxmeow.risingstones.feature.personaldata.presentation.NativeOccultWeapons =
+    top.cxmeow.risingstones.feature.personaldata.presentation.NativeOccultProjection.weapons(catalog, items, aether)
+
 @Composable
 fun PublishedPersonalDataWithShare(service: PersonalDataService,
     host: top.cxmeow.risingstones.feature.personaldata.ui.compose.PersonalDataShareHost) {
