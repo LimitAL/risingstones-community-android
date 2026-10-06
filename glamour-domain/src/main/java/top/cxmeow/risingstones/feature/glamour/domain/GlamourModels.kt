@@ -125,6 +125,10 @@ data class GlamourDetail(
     val isCouponClaimed: Boolean = false,
     val isFollowingAuthor: Boolean = false,
     val tags: List<GlamourDetailTag> = emptyList(),
+    /** Author-declared applicable jobs, supplied by the detail response with names. */
+    val jobs: List<GlamourJob> = emptyList(),
+    /** Author-declared applicable genders: 1 male, 2 female; unknown IDs are retained. */
+    val genderIds: List<Int> = emptyList(),
 )
 
 data class GlamourDetailTag(
@@ -135,7 +139,11 @@ data class GlamourDetailTag(
     val categoryName: String?,
     val categorySort: Int = Int.MAX_VALUE,
     val tagSort: Int = Int.MAX_VALUE,
+    /** Stable category code such as skin_tone; absent and unknown codes are preserved. */
+    val categoryCode: String? = null,
 )
+
+data class GlamourJob(val id: Int, val name: String)
 
 data class GlamourAccessory(val id: Int, val name: String, val iconId: String?)
 

@@ -37,6 +37,7 @@ import top.cxmeow.risingstones.feature.glamour.domain.GlamourEquipmentSearchResu
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourException
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourFavoriteFolder
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourGlassesSearchGroup
+import top.cxmeow.risingstones.feature.glamour.domain.GlamourJob
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourListPage
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourListRequest
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourListSource
@@ -434,8 +435,20 @@ class GlamourApiService(
             (data.intValue("is_receive", "isReceive") ?: user?.intValue("is_receive", "isReceive") ?: 0) == 1,
             (data.intValue("relation") ?: 0) in 2..3,
             detailTags(data),
+            jobs = detailJobs(data),
+            genderIds = data.intArray("gender_ids", "genderIds"),
         )
     }
+
+    private fun detailJobs(data: JsonObject): List<GlamourJob> =
+        data.arrayValue("job_ids", "jobIds").mapNotNull { value ->
+            // Legacy bare IDs have no display name; do not infer one from another source.
+            val job = value as? JsonObject ?: return@mapNotNull null
+            val id = job.intValue("id") ?: return@mapNotNull null
+            val name = (job["name"] as? JsonPrimitive)?.takeIf { it.isString }
+                ?.contentOrNull?.takeIf(String::isNotEmpty) ?: return@mapNotNull null
+            GlamourJob(id, name)
+        }
 
     private fun detailTags(data: JsonObject): List<top.cxmeow.risingstones.feature.glamour.domain.GlamourDetailTag> =
         data.arrayValue("tags").mapNotNull { value ->
@@ -456,6 +469,8 @@ class GlamourApiService(
                     ?.trim()?.takeIf(String::isNotEmpty),
                 categorySort = tag.intValue("category_sort", "categorySort") ?: Int.MAX_VALUE,
                 tagSort = tag.intValue("tag_sort", "tagSort") ?: Int.MAX_VALUE,
+                categoryCode = (tag.element("category_code", "categoryCode") as? JsonPrimitive)
+                    ?.takeIf { it.isString }?.contentOrNull,
             )
         }.sortedWith(compareBy({ it.categorySort }, { it.tagSort }, { it.id }))
 
