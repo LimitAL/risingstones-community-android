@@ -6,8 +6,11 @@ import top.cxmeow.risingstones.feature.glamour.domain.GlamourBrowsePage
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourBrowseRequest
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourBrowsingService
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourCollectionService
+import top.cxmeow.risingstones.feature.glamour.domain.GlamourDetail
+import top.cxmeow.risingstones.feature.glamour.domain.GlamourDetailTag
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourFilter
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourFolderNameMaximumLength
+import top.cxmeow.risingstones.feature.glamour.domain.GlamourJob
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourListPage
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourListRequest
 import top.cxmeow.risingstones.feature.glamour.domain.GlamourService
@@ -52,6 +55,22 @@ suspend fun readPublishedLegacyGlamours(
 ): GlamourListPage {
     val service: GlamourService = GlamourApiService(client, session)
     return service.fetchGlamours(GlamourListRequest())
+}
+
+/** This fixture compiles against published AARs, including regenerated constructor/copy signatures. */
+suspend fun readPublishedGlamourDetailMetadata(
+    client: RisingStonesPublicApiClient,
+    session: RisingStonesSessionProvider,
+    listingId: Int,
+): GlamourDetail {
+    val detail = GlamourApiService(client, session).fetchDetail(listingId)
+    val jobs: List<GlamourJob> = detail.jobs.map { GlamourJob(it.id, it.name) }
+    val genders: List<Int> = detail.genderIds
+    val tags: List<GlamourDetailTag> = detail.tags.map { tag ->
+        val categoryCode: String? = tag.categoryCode
+        tag.copy(categoryCode = categoryCode)
+    }
+    return detail.copy(jobs = jobs, genderIds = genders, tags = tags)
 }
 
 suspend fun usePublishedGlamourCollections(
