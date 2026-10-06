@@ -436,7 +436,7 @@ class GlamourApiService(
             (data.intValue("relation") ?: 0) in 2..3,
             detailTags(data),
             jobs = detailJobs(data),
-            genderIds = data.intArray("gender_ids", "genderIds"),
+            genderIds = data.arrayValue("gender_ids", "genderIds").mapNotNull(::detailMetadataInt),
         )
     }
 
@@ -444,11 +444,18 @@ class GlamourApiService(
         data.arrayValue("job_ids", "jobIds").mapNotNull { value ->
             // Legacy bare IDs have no display name; do not infer one from another source.
             val job = value as? JsonObject ?: return@mapNotNull null
-            val id = job.intValue("id") ?: return@mapNotNull null
+            val id = detailMetadataInt(job["id"]) ?: return@mapNotNull null
             val name = (job["name"] as? JsonPrimitive)?.takeIf { it.isString }
                 ?.contentOrNull?.takeIf(String::isNotEmpty) ?: return@mapNotNull null
             GlamourJob(id, name)
         }
+
+    private fun detailMetadataInt(value: JsonElement?): Int? {
+        val primitive = value as? JsonPrimitive ?: return null
+        // Numeric fractions truncate toward zero; strings must encode an integer.
+        if (primitive.isString) return primitive.content.toIntOrNull()
+        return primitive.intOrNull ?: primitive.doubleOrNull?.toInt()
+    }
 
     private fun detailTags(data: JsonObject): List<top.cxmeow.risingstones.feature.glamour.domain.GlamourDetailTag> =
         data.arrayValue("tags").mapNotNull { value ->

@@ -79,6 +79,46 @@ class GlamourDetailMetadataTest {
     }
 
     @Test
+    fun genderMetadataTruncatesNumericFractionsButRejectsDecimalAndExponentStrings() = runBlocking {
+        val detail = fetchDetail("""
+            {"id":42,"gender_ids":[
+              2.9,-2.9,2.0,2e0,"2",99,-7,
+              "2.9","2.0","2e0"," 2 ",null,true,false,{},[]
+            ]}
+        """.trimIndent())
+
+        assertEquals(listOf(2, -2, 2, 2, 2, 99, -7), detail.genderIds)
+    }
+
+    @Test
+    fun namedJobsTruncateNumericFractionsButDoNotParseFractionalOrExponentStrings() = runBlocking {
+        val detail = fetchDetail("""
+            {"id":42,"job_ids":[
+              {"id":"24.9","name":"Decimal string"},
+              {"id":"24.0","name":"Whole decimal string"},
+              {"id":"2.4e1","name":"Exponent string"},
+              {"id":" 24 ","name":"Padded string"},
+              {"id":24.9,"name":"Numeric fraction"},
+              {"id":-24.9,"name":"Negative fraction"},
+              {"id":24.0,"name":"Whole decimal"},
+              {"id":2.4e1,"name":"Numeric exponent"},
+              {"id":"24","name":"Integer string"},
+              {"id":99,"name":"Unknown job"},
+              {"id":-7,"name":"Unknown negative job"},
+              {"id":true,"name":"Boolean"},
+              {"id":null,"name":"Null"},{"id":{},"name":"Object"}
+            ]}
+        """.trimIndent())
+
+        assertEquals(listOf(
+            GlamourJob(24, "Numeric fraction"), GlamourJob(-24, "Negative fraction"),
+            GlamourJob(24, "Whole decimal"), GlamourJob(24, "Numeric exponent"),
+            GlamourJob(24, "Integer string"), GlamourJob(99, "Unknown job"),
+            GlamourJob(-7, "Unknown negative job"),
+        ), detail.jobs)
+    }
+
+    @Test
     fun absentNullEmptyAndLegacyResponsesKeepMetadataOptional() = runBlocking {
         for (data in listOf(
             """{"id":42}""",
