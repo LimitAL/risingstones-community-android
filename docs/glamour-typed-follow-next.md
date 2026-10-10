@@ -7,3 +7,9 @@
 该Kotlin data class新增主构造参数会改变JVM构造及copy/copy$default签名，旧预编译消费者二进制不兼容；默认参数仅提供相应Kotlin源码调用兼容。必须下一正式非SNAPSHOT版本全库重建、Maven消费者验证及下游重新编译。今天SDK集中同步已用于beta.7，该候选只本地提交验证，不追加远端写入。Android消费补丁保留独立归档，在正式包含该API的新SDK发布和消费者验证前不应用，不提前改变固定依赖。真实MainHTTP/英简繁18配置UI及全局通知仲裁仍NOT-RUN/OPEN；NaN/Infinity决定不变。
 
 首次候选d0cd37实际focused编译FAIL30s：followFailure误置于GlamourInteractionUiState，GlamourUiState的copy无此参数，尚无新JVM或lint通过。失败源码/log/receipt独立保留；最小修复移到正确GlamourUiState末尾并移除interaction误置字段。静态apply-check不代表编译或API合同通过。
+
+## 本地修正后终态
+
+实际测试生产源码ff714ce602d0e34903f1ea69eb2041a91a533aac，644输入前后保持。focused门禁PASS37s：75tests/4reports零失败，其中4项新增实际ViewModel回归执行通过；lint零错误/1warning、AAR及SDK UI消费者编译通过。规范Gradle9.5全仓门禁PASS3m23s：1332tests/128reports零失败、41lint报告累计零错误/87warning/4hint、1953tasks（1874实际执行/79up-to-date），整库和SDK应用重编译通过。debug APK CRC/v2签名通过，其默认SNAPSHOT版本仅为开发验证，不是发行。
+
+宿主独立归档为sdk-typed-follow-ff714ce-archive.json及sdk-typed-follow-full-ff714ce-archive.json，报告ZIP均CRC及每项哈希核验通过；d0cd37首次编译失败保持原状。下一正式版本Maven发布、发布后真实仓库消费者、Android接入及真实MainHTTP/三语18配置UI尚未执行。不可将beta.7发行结果继承到本候选，今天不追加SDK或Android远端同步。
