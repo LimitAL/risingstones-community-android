@@ -552,7 +552,7 @@ class GlamourApiService(
                 }
                 if (response != null && response.intValue("code") != 10105 && !response.isAuthenticationFailure()) {
                     val code = response.intValue("code") ?: throw GlamourException.MissingPayload
-                    if (!RisingStonesResponsePolicy.accepts(code)) throw GlamourException.Business(code, null)
+                    if (!RisingStonesResponsePolicy.accepts(code)) throw GlamourException.Business(code, response.stringValue("msg", "message"))
                     return response
                 }
                 if (attempt == 1) throw GlamourException.AuthenticationRequired

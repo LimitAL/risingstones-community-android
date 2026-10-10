@@ -93,6 +93,43 @@ class GlamourResponseCodeTest {
         }
     }
 
+    @Test
+    fun rejectedMutationsPreserveServerReasonWithoutRefreshOrReplay() = runBlocking {
+        val actions = listOf<Pair<String, suspend (GlamourApiService) -> Unit>>(
+            "createFavorites" to { it.createFavoriteFolder("Fixture", true) },
+            "updateFavorites" to { it.updateFavoriteFolder(7, "Updated", false) },
+            "deleteFavorites" to { it.deleteFavoriteFolder(7) },
+            "claimCoupon" to { it.claimCoupon("fixture-invite", 42) },
+            "favorite" to { it.favoriteInFolder(42, 7) },
+            "cancelFavorite" to { it.cancelFavorite(42) },
+            "follow" to { it.followAuthor("fixture-author") },
+            "cancelFollow" to { it.cancelFollowAuthor("fixture-author") },
+            "like" to { it.toggleLike(42); Unit },
+        )
+        for ((envelope, expected) in listOf(
+            """{"code":10999,"msg":"收藏夹已关闭"}""" to "收藏夹已关闭",
+            """{"code":10999,"message":"Folder unavailable"}""" to "Folder unavailable",
+            """{"code":10999,"msg":"Primary","message":"Fallback"}""" to "Primary",
+            """{"code":10999,"msg":null}""" to null,
+            """{"code":10999}""" to null,
+        )) {
+            for ((path, action) in actions) {
+                val transport = ResponseCodeTransport().apply { body = envelope }
+                val session = ResponseCodeSession()
+                try {
+                    action(service(transport, session))
+                    fail("Rejected mutation must throw the business failure")
+                } catch (error: GlamourException.Business) {
+                    assertEquals(10999, error.code)
+                    assertEquals(expected, error.reason)
+                }
+                assertEquals(1, transport.requests.size)
+                assertEquals(path, transport.requests.single().url.toHttpUrl().pathSegments.last())
+                assertEquals(0, session.refreshes)
+            }
+        }
+    }
+
     private fun service(transport: ResponseCodeTransport, session: ResponseCodeSession) = GlamourApiService(
         RisingStonesPublicApiClient(transport, listOf("https://rising.test")), session,
     )
