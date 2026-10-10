@@ -15,3 +15,9 @@
 宿主独立归档为sdk-typed-follow-ff714ce-archive.json及sdk-typed-follow-full-ff714ce-archive.json，报告ZIP均CRC及每项哈希核验通过；d0cd37首次编译失败保持原状。下一正式版本Maven发布、发布后真实仓库消费者、Android接入及真实MainHTTP/三语18配置UI尚未执行。不可将beta.7发行结果继承到本候选，今天不追加SDK或Android远端同步。
 
 公开Maven隔离入口增加对GlamourUiState默认构造、followFailure getter及Business.code的实际编译消费，避免只验证源码内部引用或旧API；将用独立本地非SNAPSHOT候选验证完整release AAR与22隔离API+aggregate。此新增仅消费者验证源码，以上ff714生产门禁证据保持独立，新的Maven执行终态待记录。
+
+## 隔离 Maven 消费终态
+
+实际候选 e943992308206cfc1262062f06d992a96220ef28 使用独立本地非 SNAPSHOT 版本 `0.1.0-next.localverify.e94399230820`。40 公共模块 release 发布、22 隔离 API 入口及聚合消费者全部 PASS；包含新增默认构造、followFailure getter 和 Business.code 的公开 AAR 消费。1000 文件哈希与记录一致，120 AAR/JAR ZIP CRC 通过，40 POM 自身版本和内部依赖均固定到候选版本。宿主证据 sdk-typed-follow-local-maven-current.json 与 sdk-typed-follow-e943-integrity.json。
+
+该验证只使用本地发布仓库；候选没有远端提交/tag/正式 Maven 发布，不代表正式发布后的消费者。生产源码与 ff714 全仓门禁保持相同，新增消费者源码的独立 Maven 编译已执行。Android 接入和真实 UI 仍未执行。
