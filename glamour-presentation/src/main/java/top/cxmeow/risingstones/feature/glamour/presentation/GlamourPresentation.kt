@@ -71,6 +71,8 @@ data class GlamourUiState(
     val folderMutationError: String? = null,
     val listError: String? = null,
     val error: String? = null,
+    /** Typed relation failure for localized consumers; legacy followError remains available. */
+    val followFailure: Throwable? = null,
 )
 
 data class GlamourBrowsingUiState(
@@ -96,8 +98,6 @@ data class GlamourInteractionUiState(
     val isClaimingCoupon: Boolean = false,
     val couponError: String? = null,
     val couponClaimedNotice: Boolean = false,
-    /** Typed relation failure for localized consumers; legacy followError remains available. */
-    val followFailure: Throwable? = null,
 )
 
 class GlamourViewModel(
