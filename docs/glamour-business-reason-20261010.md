@@ -16,4 +16,9 @@
 
 独立本地验证版本0.1.0-beta.7-localverify.bec8b06120c3通过 publishPublicLibrariesToLocalRepository、verify-local-publications.sh 的40公共模块及必需POM元数据检查；120AAR/JAR的CRC、40POM精确版本及SDK内部依赖版本通过。verify-maven-api-consumption.sh 实际从本地Maven仓库编译22隔离API入口和aggregate全部通过，无composite源码替换。这是本地发布前验证，不代表该版本已在远端发布，也不替代发布后真实Maven消费者。
 
-宿主证据目录 `/Users/arins/Documents/Codex/2026-10-09/task-2/evidence/template-library-host`：`sdk-full-bec8b06-archive.json`、`sdk-local-maven-bec8-current.json`、`sdk-local-maven-bec8-integrity.json`；本地发布consumer run `1716c9abbe7c475f8732edf403a35028`。正式非SNAPSHOT远端Maven发布、签名发行、发布后消费者、新Android依赖及真实设备UI均NOT-RUN。后续依此顺序推进，Android仍固定0.1.0-beta.6。
+宿主独立证据归档：`sdk-full-bec8b06-archive.json`、`sdk-local-maven-bec8-current.json`、`sdk-local-maven-bec8-integrity.json`；本地发布consumer run `1716c9abbe7c475f8732edf403a35028`。正式非SNAPSHOT远端Maven发布、签名发行、发布后消费者、新Android依赖及真实设备UI均NOT-RUN。后续依此顺序推进，Android仍固定0.1.0-beta.6。
+
+
+## beta.7 发布候选
+
+候选版本为0.1.0-beta.7；使用既有签名及GitHub Packages工作流，不修改凭据、权限、签名配置或下游自动化配置。发布前已核实main为c5df0bb474e207001d3b9a57f88ed6b735b5b5f6、beta.7 tag及Release不存在、今天SDK尚无集中同步。最终生产644输入与已验证bec8相同。正式版本是否发布成功以精确远端tag、CI及实际发布制品/正式仓库消费者证据为准；这里记录候选，不预先标记发布完成。
