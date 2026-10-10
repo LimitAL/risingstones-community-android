@@ -13,3 +13,5 @@
 实际测试生产源码ff714ce602d0e34903f1ea69eb2041a91a533aac，644输入前后保持。focused门禁PASS37s：75tests/4reports零失败，其中4项新增实际ViewModel回归执行通过；lint零错误/1warning、AAR及SDK UI消费者编译通过。规范Gradle9.5全仓门禁PASS3m23s：1332tests/128reports零失败、41lint报告累计零错误/87warning/4hint、1953tasks（1874实际执行/79up-to-date），整库和SDK应用重编译通过。debug APK CRC/v2签名通过，其默认SNAPSHOT版本仅为开发验证，不是发行。
 
 宿主独立归档为sdk-typed-follow-ff714ce-archive.json及sdk-typed-follow-full-ff714ce-archive.json，报告ZIP均CRC及每项哈希核验通过；d0cd37首次编译失败保持原状。下一正式版本Maven发布、发布后真实仓库消费者、Android接入及真实MainHTTP/三语18配置UI尚未执行。不可将beta.7发行结果继承到本候选，今天不追加SDK或Android远端同步。
+
+公开Maven隔离入口增加对GlamourUiState默认构造、followFailure getter及Business.code的实际编译消费，避免只验证源码内部引用或旧API；将用独立本地非SNAPSHOT候选验证完整release AAR与22隔离API+aggregate。此新增仅消费者验证源码，以上ff714生产门禁证据保持独立，新的Maven执行终态待记录。
