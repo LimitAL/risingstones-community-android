@@ -104,7 +104,7 @@ class GlamourResponseCodeTest {
             "cancelFavorite" to { it.cancelFavorite(42) },
             "follow" to { it.followAuthor("fixture-author") },
             "cancelFollow" to { it.cancelFollowAuthor("fixture-author") },
-            "like" to { it.toggleLike(42); Unit },
+            "like" to { it.toggleLike(42) },
         )
         for ((envelope, expected) in listOf(
             """{"code":10999,"msg":"收藏夹已关闭"}""" to "收藏夹已关闭",
@@ -127,6 +127,26 @@ class GlamourResponseCodeTest {
                 assertEquals(path, transport.requests.single().url.toHttpUrl().pathSegments.last())
                 assertEquals(0, session.refreshes)
             }
+        }
+    }
+
+    @Test
+    fun rejectedReadMessagesStayRedactedForBothEnvelopeAliases() = runBlocking {
+        for (field in listOf("msg", "message")) {
+            val transport = ResponseCodeTransport().apply {
+                body = """{"code":10999,"$field":"private-read-fixture"}"""
+            }
+            val session = ResponseCodeSession()
+            try {
+                service(transport, session).fetchBrowsePage(GlamourBrowseRequest())
+                fail("Rejected GET must throw a redacted business error")
+            } catch (error: GlamourException.Business) {
+                assertEquals(10999, error.code)
+                assertEquals(null, error.reason)
+                org.junit.Assert.assertFalse(error.toString().contains("private-read-fixture"))
+            }
+            assertEquals(RisingStonesHttpMethod.Get, transport.requests.single().method)
+            assertEquals(0, session.refreshes)
         }
     }
 

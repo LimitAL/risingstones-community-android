@@ -525,17 +525,18 @@ class GlamourApiService(
     private suspend fun perform(
         request: (Map<String, String>) -> RisingStonesApiRequest,
     ): JsonObject {
-        suspend fun execute(authorizer: RisingStonesRequestAuthorizer): JsonObject {
+        suspend fun execute(authorizer: RisingStonesRequestAuthorizer): Pair<JsonObject, RisingStonesHttpMethod> {
             if (!hasCommunityIdentity) throw GlamourException.AuthenticationRequired
             val path = request(emptyMap()).path
             val headers = authorizer.headers(path)
-            val response = client.execute(request(headers))
+            val authorizedRequest = request(headers)
+            val response = client.execute(authorizedRequest)
             if (response.statusCode !in 200..299) {
                 throw RisingStonesHttpException.ServerResponse(response.statusCode, response.body)
             }
             val root = try { json.parseToJsonElement(response.body.decodeToString()) as? JsonObject }
                 catch (_: IllegalArgumentException) { null } ?: throw GlamourException.MissingPayload
-            return root
+            return root to authorizedRequest.method
         }
         try {
             if (!hasCommunityIdentity) throw GlamourException.AuthenticationRequired
@@ -543,16 +544,22 @@ class GlamourApiService(
                 ?: throw GlamourException.AuthenticationRequired
             repeat(2) { attempt ->
                 var conflict = false
-                val response = try { execute(authorizer) }
+                val execution = try { execute(authorizer) }
                 catch (error: CancellationException) { throw error }
                 catch (error: Exception) {
                     conflict = error.isHttpIdentityConflict()
                     if (error is GlamourException.AuthenticationRequired || error.isHttpAuthenticationFailure() || conflict) null
                     else throw error
                 }
+                val response = execution?.first
                 if (response != null && response.intValue("code") != 10105 && !response.isAuthenticationFailure()) {
                     val code = response.intValue("code") ?: throw GlamourException.MissingPayload
-                    if (!RisingStonesResponsePolicy.accepts(code)) throw GlamourException.Business(code, response.stringValue("msg", "message"))
+                    if (!RisingStonesResponsePolicy.accepts(code)) {
+                        val mutation = requireNotNull(execution).second in setOf(
+                            RisingStonesHttpMethod.Post, RisingStonesHttpMethod.Put, RisingStonesHttpMethod.Delete,
+                        )
+                        throw GlamourException.Business(code, if (mutation) response.stringValue("msg", "message") else null)
+                    }
                     return response
                 }
                 if (attempt == 1) throw GlamourException.AuthenticationRequired

@@ -5,3 +5,7 @@
 现有有限HTTP测试扩展9个mutation×5响应（msg、message、两者优先、null、缺失），逐项检查code/reason、单次请求、零refresh；保留既有成功/authlooking消息测试。完整SDK/消费者/设备/live API未验证。本地独立worktree保留原仓 clean c5df，不改变Android当前固定依赖。
 
 发布须另行非SNAPSHOT版本、精确远端CI/签名附件/Maven以及消费者验证后才更新Android。今日唯一集中同步已用于Android PR11，不新增碎片化远端写入；该补丁只本地准备与验证。
+
+首次752668 module检查实际FAIL：56tests/1failure，原GlamourBrowsingApiTest读取错误保护要求reason为null，private-fixture不得展示；lint尚无合格终态。失败receipt/log/JUnitZIP独立保留，原读取断言未修改。
+
+修复收窄到实际已发送request.method为POST/PUT/DELETE，仅这些mutation传递现有msg/message；GET读取继续reason=null，保持原读取保护及9×5写入回归，新增GET两alias脱敏回归。method与已发送响应同次返回，不额外执行网络/重放或改变授权刷新/cancellation。前文共享分支全传播为历史首次失败范围；新冻结源码待验证。读取与iOS显式msg差异仍OPEN，不擅自放宽既有保护。
