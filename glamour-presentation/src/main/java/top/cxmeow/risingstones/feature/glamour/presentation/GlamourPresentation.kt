@@ -96,6 +96,8 @@ data class GlamourInteractionUiState(
     val isClaimingCoupon: Boolean = false,
     val couponError: String? = null,
     val couponClaimedNotice: Boolean = false,
+    /** Typed relation failure for localized consumers; legacy followError remains available. */
+    val followFailure: Throwable? = null,
 )
 
 class GlamourViewModel(
@@ -345,7 +347,7 @@ class GlamourViewModel(
         val current = mutableState.value.authorProfile?.isFollowing == true
         if (mutableState.value.isUpdatingFollow) return
         viewModelScope.launch {
-            mutableState.update { it.copy(isUpdatingFollow = true, followError = null) }
+            mutableState.update { it.copy(isUpdatingFollow = true, followError = null, followFailure = null) }
             try {
                 if (current) service.cancelFollowAuthor(authorId) else service.followAuthor(authorId)
                 currentCoroutineContext().ensureActive()
@@ -356,14 +358,14 @@ class GlamourViewModel(
                 currentCoroutineContext().ensureActive()
                 if (handleAuthenticationFailure(error)) return@launch
                 mutableState.update {
-                    it.copy(isUpdatingFollow = false, followError = error.message)
+                    it.copy(isUpdatingFollow = false, followError = error.message, followFailure = error)
                 }
             }
         }
     }
 
     fun clearFollowError() {
-        mutableState.update { it.copy(followError = null) }
+        mutableState.update { it.copy(followError = null, followFailure = null) }
     }
 
     fun loadMore() {
@@ -1043,7 +1045,7 @@ class GlamourViewModel(
     private fun loadAuthorProfile() {
         val authorId = profileAuthor?.id?.takeIf(String::isNotBlank) ?: return
         if (mutableState.value.isLoadingAuthorProfile) return
-        mutableState.update { it.copy(isLoadingAuthorProfile = true, followError = null) }
+        mutableState.update { it.copy(isLoadingAuthorProfile = true, followError = null, followFailure = null) }
         viewModelScope.launch {
             try {
                 val profile = service.fetchAuthorProfile(authorId)
@@ -1066,7 +1068,7 @@ class GlamourViewModel(
                         isLoadingAuthorProfile = false,
                         authorProfileResolved = true,
                         isUpdatingFollow = false,
-                        followError = error.message,
+                        followError = error.message, followFailure = error,
                     )
                 }
             }

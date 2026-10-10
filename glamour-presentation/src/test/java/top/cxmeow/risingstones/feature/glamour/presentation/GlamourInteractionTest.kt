@@ -35,6 +35,53 @@ import top.cxmeow.risingstones.feature.glamour.domain.GlamourService
 class GlamourInteractionTest {
     @get:Rule val mainDispatcherRule = MainDispatcherRule()
 
+    @Test fun profileReadFailureRetainsTypedBusinessAndSuccessfulRefreshClearsBoth() = runTest {
+        val business = GlamourException.Business(10009, null)
+        val service = InteractionServiceFake().apply { profileFailure = business }
+        val vm = GlamourViewModel(service, profileAuthor = interactionAuthor, autoLoadList = false)
+        vm.refresh(); advanceUntilIdle()
+        assertTrue(vm.state.value.followFailure === business)
+        assertEquals(10009, (vm.state.value.followFailure as GlamourException.Business).code)
+        assertEquals(business.message, vm.state.value.followError)
+        vm.clearFollowError()
+        assertNull(vm.state.value.followFailure); assertNull(vm.state.value.followError)
+        vm.refresh(); advanceUntilIdle()
+        assertTrue(vm.state.value.followFailure === business)
+        service.profileFailure = null
+        vm.refresh(); advanceUntilIdle()
+        assertNull(vm.state.value.followFailure); assertNull(vm.state.value.followError)
+        assertTrue(vm.state.value.authorProfileResolved)
+        assertTrue(vm.state.value.authorProfile != null)
+    }
+    @Test fun followFailureRetainsTypedCodeAndExplicitReasonAndClearRemovesBoth() = runTest {
+        val business = GlamourException.Business(500, "Try tomorrow")
+        val service = InteractionServiceFake().apply { followFailure = business }
+        val vm = GlamourViewModel(service, profileAuthor = interactionAuthor, autoLoadList = false)
+        vm.toggleFollow(); advanceUntilIdle()
+        assertTrue(vm.state.value.followFailure === business)
+        assertEquals("Try tomorrow", vm.state.value.followError)
+        val typed = vm.state.value.followFailure as GlamourException.Business
+        assertEquals(500, typed.code); assertEquals("Try tomorrow", typed.reason)
+        vm.clearFollowError()
+        assertNull(vm.state.value.followFailure); assertNull(vm.state.value.followError)
+    }
+    @Test fun nullableMessageFailureRemainsObservableAndRetryClearsIt() = runTest {
+        val absent = IllegalStateException()
+        val service = InteractionServiceFake().apply { followFailure = absent }
+        val vm = GlamourViewModel(service, profileAuthor = interactionAuthor, autoLoadList = false)
+        vm.toggleFollow(); advanceUntilIdle()
+        assertNull(vm.state.value.followError); assertTrue(vm.state.value.followFailure === absent)
+        service.followFailure = null
+        vm.toggleFollow(); advanceUntilIdle()
+        assertEquals(2, service.followCalls)
+        assertNull(vm.state.value.followFailure); assertNull(vm.state.value.followError)
+    }
+    @Test fun canceledFollowDoesNotPublishTypedOrLegacyFailure() = runTest {
+        val service = InteractionServiceFake().apply { followFailure = CancellationException() }
+        val vm = GlamourViewModel(service, profileAuthor = interactionAuthor, autoLoadList = false)
+        vm.toggleFollow(); advanceUntilIdle()
+        assertNull(vm.state.value.followFailure); assertNull(vm.state.value.followError)
+    }
     @Test
     fun authorPickerReadsOwnFoldersAndDoesNotReplaceTheAuthorFolders() = runTest {
         val service = InteractionServiceFake()
@@ -511,6 +558,8 @@ private class InteractionServiceFake : GlamourCollectionService {
     val claims = mutableListOf<Pair<String, Int>>()
     val details = mutableMapOf<Int, GlamourDetail>()
     var followCalls = 0
+    var followFailure: Throwable? = null
+    var profileFailure: Throwable? = null
     var folderFailureAfterWrite: Throwable? = null
     var listFailure: Throwable? = null
     var listHandler: (suspend () -> GlamourListPage)? = null
@@ -561,9 +610,12 @@ private class InteractionServiceFake : GlamourCollectionService {
     }
     override suspend fun fetchDetail(id: Int) = detailHandler?.invoke() ?: details[id] ?: interactionDetail(id)
     override suspend fun fetchProfileStatistics(authorId: String?) = GlamourProfileStatistics(1, 2, 3)
-    override suspend fun fetchAuthorProfile(authorId: String) = GlamourAuthorProfile(interactionAuthor, null, 0, 0, 0)
-    override suspend fun followAuthor(authorId: String) { followCalls++ }
-    override suspend fun cancelFollowAuthor(authorId: String) { followCalls++ }
+    override suspend fun fetchAuthorProfile(authorId: String): GlamourAuthorProfile {
+        profileFailure?.let { throw it }
+        return GlamourAuthorProfile(interactionAuthor, null, 0, 0, 0)
+    }
+    override suspend fun followAuthor(authorId: String) { followCalls++; followFailure?.let { throw it } }
+    override suspend fun cancelFollowAuthor(authorId: String) { followCalls++; followFailure?.let { throw it } }
     override suspend fun fetchRaces(): List<GlamourRace> = emptyList()
     override suspend fun searchEquipment(name: String, page: Int): List<GlamourEquipmentSearchResult> = emptyList()
     override suspend fun searchGlasses(name: String): List<GlamourGlassesSearchGroup> = emptyList()

@@ -1,0 +1,7 @@
+# 关注失败类型保留：下一版本本地候选
+
+基线为beta.7发行源码d3c5965a5f083e4fa34e650b17e5287c23743802；beta.7不包含本候选API。GlamourUiState原followError仅String，profile/list在presentation层提前丢失Business.code/reason，null message甚至使消费者无法感知失败。新增内存中的followFailure保留实际Throwable，同时维持legacy字符串；写入和读取失败、retry/start、clear及认证state重置遵循原流程，取消继续抛出。不会持久化异常，不增加HTTP、不解析旧字符串猜code，不重设计全局通知。
+
+4项实际ViewModel回归分别验证读失败身份/code及成功refresh清理、写入Business显式原因、null message可观察和retry清理、Cancellation不发布错误。执行终态另按冻结源码证据记录，不能把源码检查当测试通过。
+
+该Kotlin data class新增主构造参数会改变JVM构造及copy/copy$default签名，旧预编译消费者二进制不兼容；默认参数仅提供相应Kotlin源码调用兼容。必须下一正式非SNAPSHOT版本全库重建、Maven消费者验证及下游重新编译。今天SDK集中同步已用于beta.7，该候选只本地提交验证，不追加远端写入。Android消费补丁保留独立归档，在正式包含该API的新SDK发布和消费者验证前不应用，不提前改变固定依赖。真实MainHTTP/英简繁18配置UI及全局通知仲裁仍NOT-RUN/OPEN；NaN/Infinity决定不变。
