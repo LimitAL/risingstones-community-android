@@ -7,3 +7,9 @@ import top.cxmeow.risingstones.feature.glamour.ui.compose.RisingStonesGlamourAut
 fun PublishedGlamourAuthorNavigation() {
     RisingStonesGlamourAuthorNavigation(null) { }
 }
+
+fun PublishedGlamourTypedFollowFailureCode(
+    state: top.cxmeow.risingstones.feature.glamour.presentation.GlamourUiState =
+        top.cxmeow.risingstones.feature.glamour.presentation.GlamourUiState(),
+): Int? = (state.followFailure as?
+    top.cxmeow.risingstones.feature.glamour.domain.GlamourException.Business)?.code
