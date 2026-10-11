@@ -21,3 +21,11 @@
 实际候选 e943992308206cfc1262062f06d992a96220ef28 使用独立本地非 SNAPSHOT 版本 `0.1.0-next.localverify.e94399230820`。40 公共模块 release 发布、22 隔离 API 入口及聚合消费者全部 PASS；包含新增默认构造、followFailure getter 和 Business.code 的公开 AAR 消费。1000 文件哈希与记录一致，120 AAR/JAR ZIP CRC 通过，40 POM 自身版本和内部依赖均固定到候选版本。宿主证据 sdk-typed-follow-local-maven-current.json 与 sdk-typed-follow-e943-integrity.json。
 
 该验证只使用本地发布仓库；候选没有远端提交/tag/正式 Maven 发布，不代表正式发布后的消费者。生产源码与 ff714 全仓门禁保持相同，新增消费者源码的独立 Maven 编译已执行。Android 接入和真实 UI 仍未执行。
+
+## 2026-10-11：保留 beta.7 二进制入口的修正候选
+
+以上主构造字段直接追加的 ABI 风险描述属于早期草稿，保留为历史记录；未将其视为实际旧二进制失败收据。当前生产候选 `7ad4c71204d9e835fc0c72f5094f72f1dc375c4a` 补齐原 34 参数构造、默认参数构造桥、无参构造及原 `copy`/`copy$default` 入口；新增 typed `followFailure` 仍参与不可变状态的相等性与复制。旧参数复制保留实际 Throwable 身份，显式 typed 复制可清除失败。
+
+实际旧消费者先用官方 beta.7 AAR 编译，冻结字节码后在新候选上运行，输出 `BETA7_PRECOMPILED_CONSUMER_PASS`；公开 JVM 描述符比较无移除。新增 3 项状态兼容回归通过；同一生产源码全仓强制重跑 129 suites／1335 项 JVM，零失败、错误、跳过，40 release AAR 及嵌套 classes.jar 的哈希、CRC 和新鲜度均通过。presentation classes.jar 与旧二进制消费制品完全一致。
+
+这些是本地准确源码证据，开发默认 SNAPSHOT 未改；正式 beta.8 签名候选、release lint/security、非 SNAPSHOT Maven 发布及官方新版本消费仍须针对最终提交执行。真实 HTTP、18 配置界面与设备验收仍 NOT-RUN；beta.7 已发布历史及旧草稿失败证据保持原状。
