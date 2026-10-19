@@ -50,9 +50,9 @@ class MessageApiService(
         val count = (payload as? JsonObject)?.number("count")
         val authors = linkedMapOf<String, MessageAuthorTarget>()
         val seenKeys = hashSetOf<String>()
-        val items = rows.map {
+        val items = rows.mapNotNull {
             val row = it as? JsonObject ?: throw MessageException.InvalidResponse
-            val item = message(row, query)
+            val item = message(row, query) ?: return@mapNotNull null
             if (seenKeys.add(item.key)) messageAuthor(row, query)?.let { author -> authors[item.key] = author }
             item
         }
@@ -132,7 +132,9 @@ internal fun unreadSummary(payload: JsonElement): MessageUnreadSummary {
         ))
 }
 
-private fun message(row: JsonObject, query: MessageQuery): CommunityMessage {
+private fun message(row: JsonObject, query: MessageQuery): CommunityMessage? {
+    if (query.category == MessageCategory.System && (row.text("msg_id")?.trim().isNullOrEmpty() ||
+        row.text("title").isNullOrBlank() && row.text("content").isNullOrBlank())) return null
     val keyFields = listOf("msg_id", "id", "recruit_response_id", "from", "from_id", "from_root_id",
         "comment_from", "like_from", "posts_comment_id", "dynamic_comment_id", "rp_comment_id",
         "guild_photo_comment_id", "posts_id", "dynamic_id", "glamour_id", "rp_id", "guild_photo_id", "uuid", "comment_uuid",
@@ -149,11 +151,15 @@ private fun message(row: JsonObject, query: MessageQuery): CommunityMessage {
         listOfNotNull(row.text("area_name"), row.text("group_name")).filter(String::isNotBlank).joinToString(" / "),
         title, content.orEmpty(), (if (query.category == MessageCategory.Comments) row.text("parent_mask_content") else row.text("parent_mask_content", "dynamic_content", "content_supp", "content_pre")).orEmpty(),
         (if (query.category == MessageCategory.Comments) listOfNotNull(row.text("comment_pic")) else
+            if (query.category == MessageCategory.System) listOfNotNull(row.text("pic_url")) else
             listOfNotNull(row.text("pic_url"), row.text("comment_pic"), row.text("cover_pic"), row.text("main_image")))
             .flatMap { it.split(',') }.map(String::trim).filter(::reviewedUrl).distinct(),
-        row.text("updated_at", "created_at").date(), target(row, query),
+        (if (query.category == MessageCategory.System) row.text("created_at") else row.text("updated_at", "created_at")).date(), target(row, query),
         row.text("link")?.takeIf(::reviewedUrl), row.text("contact_info_mask")?.takeIf(String::isNotBlank),
-        if (query.category == MessageCategory.Comments) commentMetadata(row, query) else null)
+        if (query.category == MessageCategory.Comments) commentMetadata(row, query) else null,
+        if (query.category == MessageCategory.System) MessageSystemMetadata(
+            when (row.text("type")?.trim()) { "5" -> MessageSystemKind.Announcement; "3" -> MessageSystemKind.Badge; else -> MessageSystemKind.Other },
+            isRead = row.text("is_read")?.trim() != "0") else null)
 }
 
 private fun commentMetadata(row: JsonObject, query: MessageQuery): MessageCommentMetadata {

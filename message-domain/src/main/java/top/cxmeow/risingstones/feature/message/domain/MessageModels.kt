@@ -34,6 +34,7 @@ data class CommunityMessage(
     val officialLink: String?,
     val contactInformation: String?,
     val comment: MessageCommentMetadata? = null,
+    val system: MessageSystemMetadata? = null,
 )
 
 data class MessagePage(val items: List<CommunityMessage>, val page: Int, val hasMore: Boolean)
@@ -87,3 +88,7 @@ data class MessageCommentQuote(val authorName: String, val contentHtml: String, 
 data class MessageCommentSubject(val titleHtml: String?, val detail: String?, val coverUrl: String?)
 /** A reply is available only for positive official content/comment IDs. */
 data class MessageCommentReply(val target: MessageTarget, val parentId: Int, val rootParentId: Int)
+
+/** System notices are plain text. Missing read state must not invent an unread dot. */
+enum class MessageSystemKind { Announcement, Badge, Other }
+data class MessageSystemMetadata(val kind: MessageSystemKind, val isRead: Boolean)

@@ -10,6 +10,23 @@ import top.cxmeow.risingstones.feature.message.domain.*
 import top.cxmeow.risingstones.network.*
 
 class MessageApiServiceTest {
+    @Test fun systemMetadataPreservesKindsDefaultsReadAndFiltersInvisibleRows() = runTest {
+        val transport = Transport("""{"data":[
+            {"msg_id":1,"type":5,"is_read":0,"title":"Announcement","content":"<b>literal</b>","created_at":"2026-10-18T00:00:00Z","updated_at":"2026-10-19T00:00:00Z","pic_url":"https://static.web.sdo.com/first.png,https://static.web.sdo.com/second.png","cover_pic":"https://static.web.sdo.com/wrong.png"},
+            {"msg_id":"2","type":"3","is_read":"1","title":"Badge"},
+            {"msg_id":3,"type":99,"title":"Other"},
+            {"msg_id":4,"title":"  ","content":"  "},{"title":"Missing identifier"}],"count":5}""")
+        val page = service(transport).readMessages(MessageQuery(MessageCategory.System))
+        assertEquals(3, page.items.size)
+        assertEquals(MessageSystemMetadata(MessageSystemKind.Announcement, false), page.items[0].system)
+        assertEquals(MessageSystemMetadata(MessageSystemKind.Badge, true), page.items[1].system)
+        assertEquals(MessageSystemMetadata(MessageSystemKind.Other, true), page.items[2].system)
+        assertEquals("<b>literal</b>", page.items[0].contentHtml)
+        assertEquals(java.time.Instant.parse("2026-10-18T00:00:00Z"), page.items[0].createdAt)
+        assertEquals(2, page.items[0].imageUrls.size)
+        assertFalse(page.hasMore)
+    }
+
     @Test fun commentMetadataSeparatesBodyQuoteSubjectAndReplyWithoutExtraRequests() = runTest {
         val base = "https://static.web.sdo.com/"
         val transport = Transport("""[{"comment_from":2,"posts_id":42,"posts_comment_id":7,"root_parent":0,
@@ -65,7 +82,7 @@ class MessageApiServiceTest {
     @Test fun authorMetadataUsesEachOfficialHeaderFieldWithoutAnotherMessageRead() = runTest {
         val transport = Transport("[]")
         val service: MessageAuthorService = service(transport)
-        val row = """{"id":1,"character_name":"Same name","uuid":"recruit-or-mention","comment_uuid":"commenter","like_uuid":"liker","favorite_uuid":"collector","to_uuid":"reply-recipient","from_info":{"uuid":"content-author"},"like_from":9}"""
+        val row = """{"id":1,"msg_id":1,"title":"Fixture","character_name":"Same name","uuid":"recruit-or-mention","comment_uuid":"commenter","like_uuid":"liker","favorite_uuid":"collector","to_uuid":"reply-recipient","from_info":{"uuid":"content-author"},"like_from":9}"""
         val cases = listOf(
             MessageQuery(MessageCategory.System) to null,
             MessageQuery(MessageCategory.Mentions) to MessageAuthorTarget.Community("recruit-or-mention"),
