@@ -34,12 +34,29 @@ data class RisingStonesSignInSummary(
     val rewards: List<RisingStonesReward>,
 )
 
+/** A complete, self-profile array; null on the dashboard means unavailable, never confirmed empty. */
+data class RisingStonesMedalWall(
+    val character: RisingStonesCharacter?,
+    val medals: List<RisingStonesMedal>,
+    val sourceRows: Int,
+    val rejectedRows: Int,
+)
+data class RisingStonesMedal(
+    val achievementId: String,
+    val name: String,
+    val detail: String?,
+    val typeId: String?,
+    val typeName: String?,
+    val achievedAt: String?,
+)
+
 data class RisingStonesAccountDashboard(
     val character: RisingStonesCharacter?,
     val houseRemainDayText: String?,
     val signInCount: Int?,
     val signInLogs: List<RisingStonesSignInLog>,
     val rewards: List<RisingStonesReward>,
+    val medalWall: RisingStonesMedalWall? = null,
 )
 
 data class RisingStonesDailySignInResult(

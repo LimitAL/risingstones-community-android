@@ -132,6 +132,7 @@ class RisingStonesAccountApiService(
             signInCount = summary.signInCount,
             signInLogs = summary.signInLogs,
             rewards = summary.rewards,
+            medalWall = userData.selfMedalWall(),
         )
     }
 

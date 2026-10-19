@@ -31,6 +31,11 @@ class RisingStonesAccountApiServiceTest {
         val dashboard = service.fetchDashboard()
 
         assertEquals("Hero", dashboard.character?.characterName)
+        assertEquals("Hero", dashboard.medalWall?.character?.characterName)
+        assertEquals("1", dashboard.medalWall?.medals?.single()?.typeId)
+        assertEquals(1, dashboard.medalWall?.sourceRows)
+        assertEquals(3, transport.requests.size) // Same existing user-info, sign-log and reward reads.
+        assertTrue(transport.requests.none { it.url.toHttpUrl().queryParameter("uuid") != null })
         assertEquals("陆行鸟", dashboard.character?.areaName)
         assertEquals("神意之地", dashboard.character?.groupName)
         assertEquals("剩余 7 天", dashboard.houseRemainDayText)
@@ -128,7 +133,7 @@ private class AccountTransport : RisingStonesHttpClient {
         val path = request.url.toHttpUrl().encodedPath
         val body = when {
             path.endsWith("/getUserInfo") ->
-                """{"code":10000,"data":{"characterDetail":{"character_name":"Hero","area_name":"陆行鸟","group_name":"神意之地","house_remain_day":"剩余 7 天"}}}"""
+                """{"code":10000,"data":{"character_name":"Hero","group_name":"神意之地","achieve_publish":0,"achieveInfo":[{"achieve_id":7,"achieve_name":"Medal","medal_type_id":1,"achieve_time":"2020-01-02 00:00:00"}],"characterDetail":{"character_name":"Hero","area_name":"陆行鸟","group_name":"神意之地","house_remain_day":"剩余 7 天"}}}"""
             path.endsWith("/mySignLog") ->
                 """{"code":10000,"data":{"count":"2","rows":[{"id":"1","sign_time":"2026-07-20 08:00:00","platform":"1"},{"id":"2","signTime":"2026-07-21 08:00:00","platform":2,"ipLocation":"Shanghai"}]}}"""
             path.endsWith("/signRewardList") ->
