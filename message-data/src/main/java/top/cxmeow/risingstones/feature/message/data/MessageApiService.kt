@@ -16,7 +16,7 @@ class MessageApiService(
     private val client: RisingStonesPublicApiClient,
     private val sessionProvider: RisingStonesSessionProvider,
     private val json: Json = Json { ignoreUnknownKeys = true },
-) : MessageAuthorService, MessageResponseService {
+) : MessageAuthorService, MessageResponseDetailsService {
     override val canRead: Boolean
         get() = RisingStonesCapability.MessageRead in sessionProvider.capabilities
 
@@ -28,10 +28,12 @@ class MessageApiService(
     override suspend fun readMessagesWithAuthors(query: MessageQuery): MessageAuthorPage = readPage(query).let {
         MessageAuthorPage(it.page, it.authors)
     }
-    override suspend fun readResponseMessages(query: MessageQuery): MessageResponsePage {
+    override suspend fun readResponseMessages(query: MessageQuery): MessageResponsePage = readResponseDetails(query).response
+    override suspend fun readResponseDetails(query: MessageQuery): MessageResponseDetailsPage {
         require(query.category == MessageCategory.Responses)
         val result = readPage(query)
-        return MessageResponsePage(result.page.copy(items = result.page.items.filter { it.key in result.statuses }), result.statuses)
+        return MessageResponseDetailsPage(
+            MessageResponsePage(result.page.copy(items = result.page.items.filter { it.key in result.statuses }), result.statuses), result.metadata)
     }
     private suspend fun readPage(query: MessageQuery): ParsedMessagePage {
         val endpoint = when (query.category) {
@@ -59,14 +61,18 @@ class MessageApiService(
         val authors = linkedMapOf<String, MessageAuthorTarget>()
         val seenKeys = hashSetOf<String>()
         val statuses = linkedMapOf<String, MessageResponseStatus>()
+        val metadata = linkedMapOf<String, MessageResponseMetadata>()
         val items = rows.mapNotNull {
             val row = it as? JsonObject ?: throw MessageException.InvalidResponse
             val item = message(row, query) ?: return@mapNotNull null
+            val first = seenKeys.add(item.key)
+            if (query.category == MessageCategory.Responses && !first) return@mapNotNull null
             if (query.category == MessageCategory.Responses &&
                 (!row.text("recruit_response_id").isNullOrBlank() || responseId(row, query) != null)) {
                 statuses[item.key] = MessageResponseStatus(isRecruiting(row))
+                metadata[item.key] = responseMetadata(row, query.recruitmentChannel)
             }
-            if (seenKeys.add(item.key)) messageAuthor(row, query)?.let { author -> authors[item.key] = author }
+            if (first) messageAuthor(row, query)?.let { author -> authors[item.key] = author }
             item
         }
         // The official comments endpoint can return a sparse page after filtering its mixed sources.
@@ -75,7 +81,7 @@ class MessageApiService(
             query.category == MessageCategory.Comments -> rows.isNotEmpty()
             else -> rows.size >= PageSize
         }
-        return ParsedMessagePage(MessagePage(items, page, hasMore), authors, statuses)
+        return ParsedMessagePage(MessagePage(items, page, hasMore), authors, statuses, metadata)
     }
 
     private suspend fun get(endpoint: String, parameters: List<RisingStonesApiQueryItem>): JsonElement {
@@ -213,6 +219,40 @@ private fun commentMetadata(row: JsonObject, query: MessageQuery): MessageCommen
         subject, reply)
 }
 
+private fun responseMetadata(row: JsonObject, channel: MessageRecruitmentChannel): MessageResponseMetadata {
+    fun text(key: String) = row.text(key)?.trim()?.takeIf(String::isNotEmpty)
+    fun labels(key: String, field: String) = (row[key] as? JsonArray).orEmpty().mapNotNull {
+        val obj = it as? JsonObject
+        (if (field == "style") listOf("name", "style") else listOf(field)).firstNotNullOfOrNull { key ->
+            (obj?.get(key) as? JsonPrimitive)?.takeIf { value -> value.isString }?.contentOrNull?.trim()?.takeIf(String::isNotEmpty)
+        }
+    }.distinct()
+    val uuid = (row["uuid"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull?.trim()?.takeIf(String::isNotEmpty)
+    val publisher = uuid?.let { id -> text("character_name")?.let { name -> MessageResponsePublisher(id, name,
+        listOfNotNull(text("area_name"), text("group_name")).joinToString(" ").takeIf(String::isNotEmpty),
+        text("avatar")?.takeIf(::reviewedUrl)) } }
+    val identity = if (channel == MessageRecruitmentChannel.Beginner) when (text("identity")) {
+        "1" -> MessageResponseIdentity.LookingForNewcomer
+        "2" -> MessageResponseIdentity.LookingForMentor
+        else -> null
+    } else null
+    val badge = when (channel) {
+        MessageRecruitmentChannel.Beginner -> null
+        MessageRecruitmentChannel.Duty -> text("fb_type")
+        MessageRecruitmentChannel.Guild -> text("guild_tag")
+        MessageRecruitmentChannel.Other -> text("category_name")
+    }
+    val details = when (channel) {
+        MessageRecruitmentChannel.Duty -> listOfNotNull(text("progress"), text("strategy"), text("fb_time"))
+        MessageRecruitmentChannel.Guild -> listOfNotNull(text("weekday_time"), text("weekend_time")).joinToString(" / ").takeIf(String::isNotEmpty)?.let(::listOf).orEmpty()
+        else -> emptyList()
+    }
+    return MessageResponseMetadata(publisher, identity, badge, details,
+        if (channel == MessageRecruitmentChannel.Beginner) labels("styleInfo", "style") else labels("labelInfo", "name"),
+        listOfNotNull(text("target_area_name"), text("target_group_name")).joinToString(" ").takeIf(String::isNotEmpty),
+        text("end_time").responseDate(), text("response_num")?.toIntOrNull()?.takeIf { it >= 0 })
+}
+
 private fun isRecruiting(row: JsonObject) = row.text("recruit_status")?.trim() == "1" || row.text("status")?.trim() == "1"
 private fun responseId(row: JsonObject, query: MessageQuery): Int? {
     val field = when (query.recruitmentChannel) {
@@ -229,7 +269,7 @@ private fun String?.responseDate(): Instant? {
     return runCatching { Instant.ofEpochMilli(millis.toLong()) }.getOrNull()
 }
 private data class ParsedMessagePage(val page: MessagePage, val authors: Map<String, MessageAuthorTarget>,
-    val statuses: Map<String, MessageResponseStatus>)
+    val statuses: Map<String, MessageResponseStatus>, val metadata: Map<String, MessageResponseMetadata>)
 
 private fun target(row: JsonObject, query: MessageQuery): MessageTarget? {
     if (query.category == MessageCategory.Responses) return if (isRecruiting(row))
@@ -310,7 +350,7 @@ private fun messageAuthor(row: JsonObject, query: MessageQuery): MessageAuthorTa
             "comment_uuid"
         }
         MessageCategory.Likes -> if (row.number("like_from") == 9) "favorite_uuid" else "like_uuid"
-        MessageCategory.Responses -> return MessageAuthorTarget.Self
+        MessageCategory.Responses -> return responseMetadata(row, query.recruitmentChannel).publisher?.let { MessageAuthorTarget.Community(it.uuid) }
     }
     val uuid = (row[field] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
         ?.trim()?.takeIf(String::isNotEmpty) ?: return null

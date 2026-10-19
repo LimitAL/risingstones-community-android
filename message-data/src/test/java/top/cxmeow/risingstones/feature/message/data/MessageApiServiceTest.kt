@@ -10,6 +10,49 @@ import top.cxmeow.risingstones.feature.message.domain.*
 import top.cxmeow.risingstones.network.*
 
 class MessageApiServiceTest {
+    @Test fun responseDetailsPreserveFourChannelsAndPublisherInOneRead() = runTest {
+        for (channel in MessageRecruitmentChannel.entries) {
+            val transport = Transport("""{"rows":[{"recruit_response_id":1,"id":42,"status":1,
+                "uuid":" publisher ","character_name":" Publisher ","area_name":"Area","group_name":"World",
+                "avatar":"https://static.web.sdo.com/avatar.png","identity":2,"fb_type":"Raid","progress":"Phase 2","strategy":"Plan","fb_time":"Evenings",
+                "guild_tag":"TAG","weekday_time":"Weekday","weekend_time":"Weekend","category_name":"Event",
+                "styleInfo":[{"style":"Casual"}],"labelInfo":[{"name":"Friendly"}],"target_area_name":"Target","target_group_name":"Server",
+                "end_time":"1720000000.5","response_num":"0"}],"count":1}""")
+            val result = service(transport).readResponseDetails(MessageQuery(MessageCategory.Responses, recruitmentChannel=channel))
+            assertEquals(1,transport.requests.size)
+            val metadata = result.metadataByKey.getValue(result.response.page.items.single().key)
+            assertEquals(MessageResponsePublisher("publisher","Publisher","Area World","https://static.web.sdo.com/avatar.png"),metadata.publisher)
+            assertEquals("Target Server",metadata.targetArea);assertEquals(0,metadata.responseCount)
+            assertEquals(java.time.Instant.ofEpochMilli(1720000000500),metadata.endsAt)
+            when(channel) {
+                MessageRecruitmentChannel.Beginner -> { assertEquals(MessageResponseIdentity.LookingForMentor,metadata.identity);assertEquals(listOf("Casual"),metadata.tags);assertNull(metadata.badge) }
+                MessageRecruitmentChannel.Duty -> {assertEquals("Raid",metadata.badge);assertEquals(listOf("Phase 2","Plan","Evenings"),metadata.details)}
+                MessageRecruitmentChannel.Guild -> {assertEquals("TAG",metadata.badge);assertEquals(listOf("Weekday / Weekend"),metadata.details)}
+                MessageRecruitmentChannel.Other -> {assertEquals("Event",metadata.badge);assertTrue(metadata.details.isEmpty())}
+            }
+            if(channel!=MessageRecruitmentChannel.Beginner)assertEquals(listOf("Friendly"),metadata.tags)
+        }
+    }
+    @Test fun responseMalformedPublisherLabelsAndMetadataDoNotInventValuesOrDropCard() = runTest {
+        for (invalid in listOf("NaN","Infinity","-1","1e100")) {
+            val transport=Transport("""{"rows":[{"recruit_response_id":1,"uuid":7,"character_name":"Unknown","avatar":"https://unreviewed.invalid/avatar.png",
+                "end_time":"$invalid","response_num":"2147483648","target_area_name":"  ","styleInfo":{},"labelInfo":[null,7,{"name":9},{"name":"Good"},{"name":"Good"}]}],"count":1}""")
+            val result=service(transport).readResponseDetails(MessageQuery(MessageCategory.Responses))
+            val row=result.response.page.items.single();val meta=result.metadataByKey.getValue(row.key)
+            assertNull(row.target);assertFalse(result.response.statusesByKey.getValue(row.key).isRecruiting)
+            assertNull(meta.publisher);assertNull(meta.endsAt);assertNull(meta.responseCount);assertNull(meta.targetArea);assertEquals(listOf("Good"),meta.tags)
+            assertNull(service(transport).readMessagesWithAuthors(MessageQuery(MessageCategory.Responses)).authorsByKey[row.key])
+        }
+    }
+    @Test fun responseDuplicateKeysKeepFirstCardAndItsMatchingMetadata() = runTest {
+        val transport=Transport("""{"rows":[{"recruit_response_id":1,"status":0,"uuid":"first","character_name":"First"},{"recruit_response_id":1,"status":1,"uuid":"second","character_name":"Second"}]}""")
+        // UUID participates in the stable key; same official row identity must remain coherent.
+        transport.data="""{"rows":[{"recruit_response_id":1,"status":0,"uuid":"same","character_name":"First"},{"recruit_response_id":1,"status":1,"uuid":"same","character_name":"Second"}]}"""
+        val result=service(transport).readResponseDetails(MessageQuery(MessageCategory.Responses))
+        assertEquals(1,result.response.page.items.size);val row=result.response.page.items.single()
+        assertEquals("First",result.metadataByKey.getValue(row.key).publisher?.name);assertFalse(result.response.statusesByKey.getValue(row.key).isRecruiting)
+    }
+
     @Test fun responseInvalidFieldsCannotInventDestinationsOrDates() = runTest {
         val transport = Transport("[]")
         val query = MessageQuery(MessageCategory.Responses, recruitmentChannel = MessageRecruitmentChannel.Beginner)
@@ -137,7 +180,7 @@ class MessageApiServiceTest {
             MessageQuery(MessageCategory.Comments, commentChannel = MessageCommentChannel.Sent) to MessageAuthorTarget.Self,
             MessageQuery(MessageCategory.Likes) to MessageAuthorTarget.Community("collector"),
             MessageQuery(MessageCategory.Recruitment) to MessageAuthorTarget.Community("recruit-or-mention"),
-            MessageQuery(MessageCategory.Responses) to MessageAuthorTarget.Self,
+            MessageQuery(MessageCategory.Responses) to MessageAuthorTarget.Community("recruit-or-mention"),
         )
         for ((query, expected) in cases) {
             transport.data = when (query.category) {

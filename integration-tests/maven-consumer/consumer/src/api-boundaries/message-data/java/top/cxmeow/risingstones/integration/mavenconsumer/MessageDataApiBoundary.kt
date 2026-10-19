@@ -33,3 +33,12 @@ suspend fun readPublishedResponses(service: top.cxmeow.risingstones.feature.mess
 
 fun publishedResponseStatus(page: top.cxmeow.risingstones.feature.message.domain.MessageResponsePage, key: String): Boolean? =
     page.statusesByKey[key]?.isRecruiting
+
+/** New details and legacy response constructors coexist in the published graph. */
+suspend fun readPublishedResponseDetails(service: top.cxmeow.risingstones.feature.message.domain.MessageResponseDetailsService,
+    query: top.cxmeow.risingstones.feature.message.domain.MessageQuery): top.cxmeow.risingstones.feature.message.domain.MessageResponsePublisher? {
+    val details=service.readResponseDetails(query)
+    val legacy=top.cxmeow.risingstones.feature.message.domain.MessageResponsePage(details.response.page,details.response.statusesByKey)
+    val copy=legacy.copy(page=legacy.page)
+    return copy.page.items.firstOrNull()?.key?.let { details.metadataByKey[it]?.publisher }
+}
