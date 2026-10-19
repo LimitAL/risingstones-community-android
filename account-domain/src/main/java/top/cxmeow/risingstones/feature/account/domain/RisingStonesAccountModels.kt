@@ -50,14 +50,33 @@ data class RisingStonesMedal(
     val achievedAt: String?,
 )
 
-data class RisingStonesAccountDashboard(
+data class RisingStonesAccountDashboard @JvmOverloads constructor(
     val character: RisingStonesCharacter?,
     val houseRemainDayText: String?,
     val signInCount: Int?,
     val signInLogs: List<RisingStonesSignInLog>,
     val rewards: List<RisingStonesReward>,
     val medalWall: RisingStonesMedalWall? = null,
-)
+) {
+    /** Keep the original five-field JVM copy entry point for already compiled hosts. */
+    fun copy(character: RisingStonesCharacter?, houseRemainDayText: String?, signInCount: Int?,
+        signInLogs: List<RisingStonesSignInLog>, rewards: List<RisingStonesReward>): RisingStonesAccountDashboard =
+        RisingStonesAccountDashboard(character, houseRemainDayText, signInCount, signInLogs, rewards, medalWall)
+
+    companion object {
+        /** Kotlin's original generated default-copy descriptor; keep its mask semantics unchanged. */
+        @JvmStatic
+        @Suppress("UNUSED_PARAMETER")
+        fun `copy$default`(source: RisingStonesAccountDashboard, character: RisingStonesCharacter?,
+            houseRemainDayText: String?, signInCount: Int?, signInLogs: List<RisingStonesSignInLog>?,
+            rewards: List<RisingStonesReward>?, mask: Int, marker: Any?): RisingStonesAccountDashboard =
+            source.copy(if(mask and 1!=0) source.character else character,
+                if(mask and 2!=0) source.houseRemainDayText else houseRemainDayText,
+                if(mask and 4!=0) source.signInCount else signInCount,
+                if(mask and 8!=0) source.signInLogs else requireNotNull(signInLogs),
+                if(mask and 16!=0) source.rewards else requireNotNull(rewards))
+    }
+}
 
 data class RisingStonesDailySignInResult(
     val message: String,

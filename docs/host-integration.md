@@ -884,8 +884,13 @@ COS 主机隔离默认头、CookieJar 及拦截器，写请求禁用自动重试
 
 ## 本人账号摘要中的勋章快照（本地集成，2026-10-19）
 
-`RisingStonesAccountDashboard.medalWall` 是默认 `null` 的可选附加字段，原有调用方构造器和摘要 UI 保持源码兼容；本次未发布 Maven 制品。`fetchDashboard()` 复用原本不带 `uuid` 的 `getUserInfo`，不新增请求、后台任务或持久化副作用。`ProfileOwner.User(uuid)` 的浏览资料不走此观测合同。
+`RisingStonesAccountDashboard.medalWall` 是默认 `null` 的可选附加字段，原有调用方构造器和摘要 UI 保持源码兼容；前批未发布 Maven 制品；本地兼容补查见下节。`fetchDashboard()` 复用原本不带 `uuid` 的 `getUserInfo`，不新增请求、后台任务或持久化副作用。`ProfileOwner.User(uuid)` 的浏览资料不走此观测合同。
 
 仅原始 `achieveInfo` 为数组时提供 `RisingStonesMedalWall`：真正 `[]` 的 `sourceRows` 为 0；缺段、null、类型不符返回 null。快照保留原行数和缺 ID/名称等被拒行数；勋章保留 `achievementId/name/detail/typeId/typeName/achievedAt`。数字整数和字符串 ID 转成原文本，布尔和非整数数字不当 ID；类型字符串 `1` 才能用于调用方绝境勋章分类，不能靠名称或图片推断。日期保留原文，由调用方严格校验，不用请求时间补日期。无日期的有效身份行仍保留，便于调用方统计未解析数量。
 
 快照角色仅取同层明确 `character_name/group_name/area_name`；缺身份时 `character` 为 null，不从递归的其他角色对象猜归属。本人 `achieve_publish` 不屏蔽已有本人可见数组。SDK 只传数据；需要个人日志的宿主应仅在已授权的前台本人加载处捕获目标子账号、角色和授权版本，核对返回身份并在提交时再次确认，明确排除浏览他人及自动签到读取。失败、未知、完整空应分别处理并保留历史。
+
+
+## 旧勋章摘要消费者的二进制入口
+
+添加可选data-class字段仅保证重编译后的源码兼容，不会自动保留原JVM构造器与copy签名。本次补保AccountDashboard原五参构造、显式copy及原默认copy mask入口；旧copy同时保留新增只读wall。已使用勋章前模型编译旧消费者并在实际本地Maven AAR上运行，还以无组合构建的独立消费者验证新增类型。详见[本地Maven/ABI补查](checkpoints/account-medal-abi-20261019.md)。本次Maven写入仅SDK build/repository的独立本地版本，未向外部分发。

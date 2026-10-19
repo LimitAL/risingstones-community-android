@@ -25,3 +25,5 @@ fun accountActionVerificationFromPublishedArtifact(
 fun characterAvatarFromPublishedArtifact(
     character: top.cxmeow.risingstones.feature.account.domain.RisingStonesCharacter,
 ): String? = character.avatarUrl
+
+fun medalWallFromPublishedArtifact(dashboard: top.cxmeow.risingstones.feature.account.domain.RisingStonesAccountDashboard): top.cxmeow.risingstones.feature.account.domain.RisingStonesMedalWall? = dashboard.medalWall
