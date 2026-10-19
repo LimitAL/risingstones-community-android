@@ -16,7 +16,7 @@ class MessageApiService(
     private val client: RisingStonesPublicApiClient,
     private val sessionProvider: RisingStonesSessionProvider,
     private val json: Json = Json { ignoreUnknownKeys = true },
-) : MessageAuthorService {
+) : MessageAuthorService, MessageResponseService {
     override val canRead: Boolean
         get() = RisingStonesCapability.MessageRead in sessionProvider.capabilities
 
@@ -25,7 +25,15 @@ class MessageApiService(
 
     override suspend fun readMessages(query: MessageQuery): MessagePage = readMessagesWithAuthors(query).page
 
-    override suspend fun readMessagesWithAuthors(query: MessageQuery): MessageAuthorPage {
+    override suspend fun readMessagesWithAuthors(query: MessageQuery): MessageAuthorPage = readPage(query).let {
+        MessageAuthorPage(it.page, it.authors)
+    }
+    override suspend fun readResponseMessages(query: MessageQuery): MessageResponsePage {
+        require(query.category == MessageCategory.Responses)
+        val result = readPage(query)
+        return MessageResponsePage(result.page.copy(items = result.page.items.filter { it.key in result.statuses }), result.statuses)
+    }
+    private suspend fun readPage(query: MessageQuery): ParsedMessagePage {
         val endpoint = when (query.category) {
             MessageCategory.System -> "getSysMsg"
             MessageCategory.Mentions -> "atMyMsg"
@@ -50,9 +58,14 @@ class MessageApiService(
         val count = (payload as? JsonObject)?.number("count")
         val authors = linkedMapOf<String, MessageAuthorTarget>()
         val seenKeys = hashSetOf<String>()
+        val statuses = linkedMapOf<String, MessageResponseStatus>()
         val items = rows.mapNotNull {
             val row = it as? JsonObject ?: throw MessageException.InvalidResponse
             val item = message(row, query) ?: return@mapNotNull null
+            if (query.category == MessageCategory.Responses &&
+                (!row.text("recruit_response_id").isNullOrBlank() || responseId(row, query) != null)) {
+                statuses[item.key] = MessageResponseStatus(isRecruiting(row))
+            }
             if (seenKeys.add(item.key)) messageAuthor(row, query)?.let { author -> authors[item.key] = author }
             item
         }
@@ -62,7 +75,7 @@ class MessageApiService(
             query.category == MessageCategory.Comments -> rows.isNotEmpty()
             else -> rows.size >= PageSize
         }
-        return MessageAuthorPage(MessagePage(items, page, hasMore), authors)
+        return ParsedMessagePage(MessagePage(items, page, hasMore), authors, statuses)
     }
 
     private suspend fun get(endpoint: String, parameters: List<RisingStonesApiQueryItem>): JsonElement {
@@ -143,10 +156,15 @@ private fun message(row: JsonObject, query: MessageQuery): CommunityMessage? {
         .ifBlank { row.toString() }
     val key = MessageDigest.getInstance("SHA-256").digest((query.category.name + identity).toByteArray())
         .joinToString("") { "%02x".format(it) }
-    val title = row.text("title", "posts_title", "fb_name", "guild_name").orEmpty()
+    val title = if (query.category == MessageCategory.Responses) when (query.recruitmentChannel) {
+        MessageRecruitmentChannel.Duty -> row.text("fb_name")?.takeIf(String::isNotBlank) ?: row.text("title")
+        MessageRecruitmentChannel.Guild -> row.text("guild_name")?.takeIf(String::isNotBlank) ?: row.text("title")
+        else -> row.text("title")
+    }.orEmpty() else row.text("title", "posts_title", "fb_name", "guild_name").orEmpty()
     val content = if (query.category == MessageCategory.System || query.category == MessageCategory.Mentions) {
         row.text("content")
-    } else row.text("mask_content", "content", "detail_mask")
+    } else if (query.category == MessageCategory.Responses) row.text("detail_mask")
+    else row.text("mask_content", "content", "detail_mask")
     return CommunityMessage(key, query.category, row.text("character_name").orEmpty(),
         listOfNotNull(row.text("area_name"), row.text("group_name")).filter(String::isNotBlank).joinToString(" / "),
         title, content.orEmpty(), (if (query.category == MessageCategory.Comments) row.text("parent_mask_content") else row.text("parent_mask_content", "dynamic_content", "content_supp", "content_pre")).orEmpty(),
@@ -154,8 +172,9 @@ private fun message(row: JsonObject, query: MessageQuery): CommunityMessage? {
             if (query.category == MessageCategory.System) listOfNotNull(row.text("pic_url")) else
             listOfNotNull(row.text("pic_url"), row.text("comment_pic"), row.text("cover_pic"), row.text("main_image")))
             .flatMap { it.split(',') }.map(String::trim).filter(::reviewedUrl).distinct(),
-        (if (query.category == MessageCategory.System) row.text("created_at") else row.text("updated_at", "created_at")).date(), target(row, query),
-        row.text("link")?.takeIf(::reviewedUrl), row.text("contact_info_mask")?.takeIf(String::isNotBlank),
+        (if (query.category == MessageCategory.Responses) row.text("created_at").responseDate()
+            else (if (query.category == MessageCategory.System) row.text("created_at") else row.text("updated_at", "created_at")).date()), target(row, query),
+        row.text("link")?.takeIf(::reviewedUrl), row.text("contact_info_mask")?.let { if (query.category == MessageCategory.Responses) it.trim() else it }?.takeIf(String::isNotBlank),
         if (query.category == MessageCategory.Comments) commentMetadata(row, query) else null,
         if (query.category == MessageCategory.System) MessageSystemMetadata(
             when (row.text("type")?.trim()) { "5" -> MessageSystemKind.Announcement; "3" -> MessageSystemKind.Badge; else -> MessageSystemKind.Other },
@@ -194,7 +213,27 @@ private fun commentMetadata(row: JsonObject, query: MessageQuery): MessageCommen
         subject, reply)
 }
 
+private fun isRecruiting(row: JsonObject) = row.text("recruit_status")?.trim() == "1" || row.text("status")?.trim() == "1"
+private fun responseId(row: JsonObject, query: MessageQuery): Int? {
+    val field = when (query.recruitmentChannel) {
+        MessageRecruitmentChannel.Beginner -> "recruit_ne_id"
+        MessageRecruitmentChannel.Duty -> "recruit_fb_id"
+        MessageRecruitmentChannel.Guild -> "recruit_guild_id"
+        MessageRecruitmentChannel.Other -> "recruit_other_id"
+    }
+    return row.number(field)?.takeIf { it > 0 } ?: row.number("id")?.takeIf { it > 0 }
+}
+private fun String?.responseDate(): Instant? {
+    val seconds = this?.toDoubleOrNull()?.takeIf { it.isFinite() && it > 0 } ?: return null
+    val millis = (seconds * 1000).takeIf { it.isFinite() && it < Long.MAX_VALUE.toDouble() } ?: return null
+    return runCatching { Instant.ofEpochMilli(millis.toLong()) }.getOrNull()
+}
+private data class ParsedMessagePage(val page: MessagePage, val authors: Map<String, MessageAuthorTarget>,
+    val statuses: Map<String, MessageResponseStatus>)
+
 private fun target(row: JsonObject, query: MessageQuery): MessageTarget? {
+    if (query.category == MessageCategory.Responses) return if (isRecruiting(row))
+        responseId(row, query)?.let { MessageTarget(MessageTargetKind.Recruitment, it, query.recruitmentChannel) } else null
     fun link(kind: MessageTargetKind, key: String, channel: MessageRecruitmentChannel? = null) =
         row.number(key)?.takeIf { it > 0 }?.let { MessageTarget(kind, it, channel) }
     fun post(key: String) = when (row.number("posts_type")) {

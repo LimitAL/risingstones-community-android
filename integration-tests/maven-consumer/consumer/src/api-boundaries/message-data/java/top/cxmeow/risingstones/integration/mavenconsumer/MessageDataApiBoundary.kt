@@ -18,3 +18,18 @@ fun publishedCommentMetadata(message: top.cxmeow.risingstones.feature.message.do
 
 fun publishedReplyDestination(metadata: top.cxmeow.risingstones.feature.message.domain.MessageCommentMetadata):
     top.cxmeow.risingstones.feature.message.domain.MessageCommentReply? = metadata.reply
+
+/** Kept precompiled for the local ae82 -> candidate runtime linkage probe. */
+fun publishedMessageDefaultAndCopyAbi(): top.cxmeow.risingstones.feature.message.domain.CommunityMessage {
+    val old = top.cxmeow.risingstones.feature.message.domain.CommunityMessage(
+        "abi", top.cxmeow.risingstones.feature.message.domain.MessageCategory.System,
+        "", "", "before", "", "", emptyList(), null, null, null, null)
+    return old.copy(title = "ABI retained")
+}
+
+suspend fun readPublishedResponses(service: top.cxmeow.risingstones.feature.message.domain.MessageResponseService,
+    query: top.cxmeow.risingstones.feature.message.domain.MessageQuery): top.cxmeow.risingstones.feature.message.domain.MessageResponsePage =
+    service.readResponseMessages(query)
+
+fun publishedResponseStatus(page: top.cxmeow.risingstones.feature.message.domain.MessageResponsePage, key: String): Boolean? =
+    page.statusesByKey[key]?.isRecruiting

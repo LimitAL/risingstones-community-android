@@ -10,6 +10,53 @@ import top.cxmeow.risingstones.feature.message.domain.*
 import top.cxmeow.risingstones.network.*
 
 class MessageApiServiceTest {
+    @Test fun responseInvalidFieldsCannotInventDestinationsOrDates() = runTest {
+        val transport = Transport("[]")
+        val query = MessageQuery(MessageCategory.Responses, recruitmentChannel = MessageRecruitmentChannel.Beginner)
+        for (date in listOf("NaN", "Infinity", "-1", "1e100", "9223372036854776")) {
+            transport.data = """{"rows":[{"recruit_response_id":1,"recruit_ne_id":"2147483648","recruit_fb_id":99,"status":1,"created_at":"$date"}],"count":1}"""
+            val row = service(transport).readResponseMessages(query).page.items.single()
+            assertNull(row.target); assertNull(row.createdAt)
+        }
+        transport.data = """{"rows":[{"recruit_response_id":1,"id":42,"title":"Missing status"}],"count":1}"""
+        val result = service(transport).readResponseMessages(query)
+        assertFalse(result.statusesByKey.values.single().isRecruiting)
+        assertNull(result.page.items.single().target)
+        transport.data = """{"rows":[{"recruit_response_id":2,"id":42,"status":1,"end_time":"1"}],"count":1}"""
+        assertEquals(42, service(transport).readResponseMessages(query).page.items.single().target?.id)
+    }
+
+    @Test fun responsesKeepEndedContactButNeverEndedDestinations() = runTest {
+        for (channel in MessageRecruitmentChannel.entries) {
+            val field = when (channel) {
+                MessageRecruitmentChannel.Beginner -> "recruit_ne_id"
+                MessageRecruitmentChannel.Duty -> "recruit_fb_id"
+                MessageRecruitmentChannel.Guild -> "recruit_guild_id"
+                MessageRecruitmentChannel.Other -> "recruit_other_id"
+            }
+            val transport = Transport("""{"rows":[
+                {"recruit_response_id":1,"$field":42,"status":1,"title":"Synthetic active","detail_mask":"<b>Summary</b>","contact_info_mask":"  synthetic-contact\nsecond-line  ","created_at":"1720000000.5"},
+                {"recruit_response_id":2,"$field":43,"recruit_status":0,"status":0,"title":"Synthetic ended","contact_info_mask":"ended-contact","created_at":"Infinity"},
+                {"recruit_response_id":3,"$field":0,"recruit_status":1,"title":"Missing destination","contact_info_mask":"   "},
+                {"recruit_response_id":4,"$field":44,"recruit_status":1,"status":0,"title":"OR rule"}
+            ],"count":4}""")
+            val result = service(transport).readResponseMessages(MessageQuery(MessageCategory.Responses, recruitmentChannel = channel))
+            assertEquals(1, transport.requests.size)
+            assertEquals(4, result.page.items.size)
+            val (active, ended, invalid, alternate) = result.page.items
+            assertEquals(MessageTarget(MessageTargetKind.Recruitment, 42, channel), active.target)
+            assertEquals("synthetic-contact\nsecond-line", active.contactInformation)
+            assertEquals(java.time.Instant.ofEpochMilli(1720000000500), active.createdAt)
+            assertNull(ended.target)
+            assertEquals("ended-contact", ended.contactInformation)
+            assertNull(ended.createdAt)
+            assertFalse(result.statusesByKey.getValue(ended.key).isRecruiting)
+            assertNull(invalid.target)
+            assertNull(invalid.contactInformation)
+            assertTrue(result.statusesByKey.getValue(alternate.key).isRecruiting)
+        }
+    }
+
     @Test fun systemMetadataPreservesKindsDefaultsReadAndFiltersInvisibleRows() = runTest {
         val transport = Transport("""{"data":[
             {"msg_id":1,"type":5,"is_read":0,"title":"Announcement","content":"<b>literal</b>","created_at":"2026-10-18T00:00:00Z","updated_at":"2026-10-19T00:00:00Z","pic_url":"https://static.web.sdo.com/first.png,https://static.web.sdo.com/second.png","cover_pic":"https://static.web.sdo.com/wrong.png"},
@@ -249,7 +296,7 @@ class MessageApiServiceTest {
         val messages = service(transport)
         assertEquals(MessageTarget(MessageTargetKind.Glamour, 42),
             messages.readMessages(MessageQuery(MessageCategory.Likes)).items.single().target)
-        transport.data = """{"count":"1","rows":[{"recruit_response_id":99,"recruit_ne_id":45,"title":"Recruit","contact_info_mask":"Fixture contact"}]}"""
+        transport.data = """{"count":"1","rows":[{"recruit_response_id":99,"recruit_ne_id":45,"status":1,"title":"Recruit","contact_info_mask":"Fixture contact"}]}"""
         val result = messages.readMessages(MessageQuery(MessageCategory.Responses, recruitmentChannel = MessageRecruitmentChannel.Beginner))
         assertEquals(MessageTarget(MessageTargetKind.Recruitment, 45, MessageRecruitmentChannel.Beginner), result.items.single().target)
         assertEquals("1", transport.requests.last().url.toHttpUrl().queryParameter("channel"))
