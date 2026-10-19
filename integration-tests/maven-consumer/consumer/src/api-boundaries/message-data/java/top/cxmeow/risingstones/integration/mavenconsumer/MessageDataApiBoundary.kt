@@ -12,3 +12,9 @@ suspend fun readPublishedMessageSummary(client: RisingStonesPublicApiClient, ses
 suspend fun readPublishedMessageAuthors(service: top.cxmeow.risingstones.feature.message.domain.MessageAuthorService,
     query: top.cxmeow.risingstones.feature.message.domain.MessageQuery): Map<String,
     top.cxmeow.risingstones.feature.message.domain.MessageAuthorTarget> = service.readMessagesWithAuthors(query).authorsByKey
+
+fun publishedCommentMetadata(message: top.cxmeow.risingstones.feature.message.domain.CommunityMessage):
+    top.cxmeow.risingstones.feature.message.domain.MessageCommentMetadata? = message.comment
+
+fun publishedReplyDestination(metadata: top.cxmeow.risingstones.feature.message.domain.MessageCommentMetadata):
+    top.cxmeow.risingstones.feature.message.domain.MessageCommentReply? = metadata.reply

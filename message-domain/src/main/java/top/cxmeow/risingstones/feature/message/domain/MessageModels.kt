@@ -33,6 +33,7 @@ data class CommunityMessage(
     val target: MessageTarget?,
     val officialLink: String?,
     val contactInformation: String?,
+    val comment: MessageCommentMetadata? = null,
 )
 
 data class MessagePage(val items: List<CommunityMessage>, val page: Int, val hasMore: Boolean)
@@ -70,3 +71,19 @@ sealed class MessageException(message: String) : Exception(message) {
     data object Network : MessageException("Message transport failed")
     class Business(val code: Int?) : MessageException("Message request failed")
 }
+
+/** Official comment fields, separated from the subject's images and body. No display copy. */
+data class MessageCommentMetadata(
+    val source: Int?,
+    val commenterUuid: String?,
+    val avatarUrl: String?,
+    val replyToName: String?,
+    val replyToUuid: String?,
+    val quote: MessageCommentQuote?,
+    val subject: MessageCommentSubject,
+    val reply: MessageCommentReply?,
+)
+data class MessageCommentQuote(val authorName: String, val contentHtml: String, val hasImage: Boolean)
+data class MessageCommentSubject(val titleHtml: String?, val detail: String?, val coverUrl: String?)
+/** A reply is available only for positive official content/comment IDs. */
+data class MessageCommentReply(val target: MessageTarget, val parentId: Int, val rootParentId: Int)

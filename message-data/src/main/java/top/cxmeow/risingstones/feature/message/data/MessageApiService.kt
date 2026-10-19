@@ -135,7 +135,7 @@ internal fun unreadSummary(payload: JsonElement): MessageUnreadSummary {
 private fun message(row: JsonObject, query: MessageQuery): CommunityMessage {
     val keyFields = listOf("msg_id", "id", "recruit_response_id", "from", "from_id", "from_root_id",
         "comment_from", "like_from", "posts_comment_id", "dynamic_comment_id", "rp_comment_id",
-        "posts_id", "dynamic_id", "glamour_id", "rp_id", "guild_photo_id", "uuid", "comment_uuid",
+        "guild_photo_comment_id", "posts_id", "dynamic_id", "glamour_id", "rp_id", "guild_photo_id", "uuid", "comment_uuid",
         "like_uuid", "favorite_uuid", "created_at", "updated_at")
     val identity = keyFields.mapNotNull { key -> row.text(key)?.let { "$key=$it" } }.joinToString("|")
         .ifBlank { row.toString() }
@@ -147,11 +147,45 @@ private fun message(row: JsonObject, query: MessageQuery): CommunityMessage {
     } else row.text("mask_content", "content", "detail_mask")
     return CommunityMessage(key, query.category, row.text("character_name").orEmpty(),
         listOfNotNull(row.text("area_name"), row.text("group_name")).filter(String::isNotBlank).joinToString(" / "),
-        title, content.orEmpty(), row.text("parent_mask_content", "dynamic_content", "content_supp", "content_pre").orEmpty(),
-        listOfNotNull(row.text("pic_url"), row.text("comment_pic"), row.text("cover_pic"), row.text("main_image"))
+        title, content.orEmpty(), (if (query.category == MessageCategory.Comments) row.text("parent_mask_content") else row.text("parent_mask_content", "dynamic_content", "content_supp", "content_pre")).orEmpty(),
+        (if (query.category == MessageCategory.Comments) listOfNotNull(row.text("comment_pic")) else
+            listOfNotNull(row.text("pic_url"), row.text("comment_pic"), row.text("cover_pic"), row.text("main_image")))
             .flatMap { it.split(',') }.map(String::trim).filter(::reviewedUrl).distinct(),
         row.text("updated_at", "created_at").date(), target(row, query),
-        row.text("link")?.takeIf(::reviewedUrl), row.text("contact_info_mask")?.takeIf(String::isNotBlank))
+        row.text("link")?.takeIf(::reviewedUrl), row.text("contact_info_mask")?.takeIf(String::isNotBlank),
+        if (query.category == MessageCategory.Comments) commentMetadata(row, query) else null)
+}
+
+private fun commentMetadata(row: JsonObject, query: MessageQuery): MessageCommentMetadata {
+    fun text(vararg keys: String) = keys.firstNotNullOfOrNull { row.text(it)?.trim()?.takeIf(String::isNotEmpty) }
+    fun image(vararg keys: String) = keys.firstNotNullOfOrNull { key ->
+        text(key)?.split(',')?.map(String::trim)?.firstOrNull(::reviewedUrl)
+    }
+    fun uuid(key: String) = (row[key] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull?.trim()?.takeIf(String::isNotEmpty)
+    val source = row.number("comment_from")
+    val subject = when (source) {
+        1 -> MessageCommentSubject(text("dynamic_content"), text("dynamic_character_name"), image("pic_url", "dynamic_avatar"))
+        2, 3 -> MessageCommentSubject(text("title", "posts_title"),
+            listOfNotNull(text("part_name"), text("posts_character_name")).joinToString(" · ").takeIf(String::isNotEmpty), image("cover_pic"))
+        4 -> MessageCommentSubject(null, text("guild_photo_character_name"), image("photo_url"))
+        5 -> MessageCommentSubject(text("rp_name"), null, null)
+        else -> MessageCommentSubject(text("title"), null, null)
+    }
+    val parentId = when (source) {
+        1 -> row.number("dynamic_comment_id")
+        2, 3 -> row.number("posts_comment_id")
+        else -> null
+    }?.takeIf { it > 0 }
+    val target = target(row, query)
+    val root = row.number("root_parent")
+    val reply = if (parentId != null && target != null && (row.text("root_parent") == null || root != null && root >= 0))
+        MessageCommentReply(target, parentId, root?.takeIf { it > 0 } ?: parentId) else null
+    return MessageCommentMetadata(source,
+        if (query.commentChannel == MessageCommentChannel.Received) uuid("comment_uuid") else null,
+        if (query.commentChannel == MessageCommentChannel.Received) image("from_avatar", "avatar") else null,
+        text("to_cname"), uuid("to_uuid"),
+        text("parent_character_name")?.let { MessageCommentQuote(it, text("parent_mask_content").orEmpty(), image("parent_comment_pic") != null) },
+        subject, reply)
 }
 
 private fun target(row: JsonObject, query: MessageQuery): MessageTarget? {

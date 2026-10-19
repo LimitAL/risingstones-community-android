@@ -10,6 +10,58 @@ import top.cxmeow.risingstones.feature.message.domain.*
 import top.cxmeow.risingstones.network.*
 
 class MessageApiServiceTest {
+    @Test fun commentMetadataSeparatesBodyQuoteSubjectAndReplyWithoutExtraRequests() = runTest {
+        val base = "https://static.web.sdo.com/"
+        val transport = Transport("""[{"comment_from":2,"posts_id":42,"posts_comment_id":7,"root_parent":0,
+            "comment_uuid":"fixture-author","character_name":"Fixture","from_avatar":"${base}avatar.png",
+            "mask_content":"Comment","comment_pic":"${base}comment.png","cover_pic":"${base}cover.png",
+            "dynamic_content":"Wrong quote","parent_character_name":"Parent","parent_comment_pic":"${base}parent.png",
+            "title":"Subject","part_name":"Forum","posts_character_name":"Publisher","to_cname":"Recipient"}]""")
+        val service = service(transport)
+        val message = service.readMessages(MessageQuery(MessageCategory.Comments)).items.single()
+        assertEquals(listOf("${base}comment.png"), message.imageUrls)
+        assertEquals("", message.contextHtml)
+        val metadata = requireNotNull(message.comment)
+        assertEquals("fixture-author", metadata.commenterUuid)
+        assertEquals("${base}avatar.png", metadata.avatarUrl)
+        assertEquals(MessageCommentQuote("Parent", "", true), metadata.quote)
+        assertEquals(MessageCommentSubject("Subject", "Forum · Publisher", "${base}cover.png"), metadata.subject)
+        assertEquals(MessageCommentReply(MessageTarget(MessageTargetKind.Post, 42), 7, 7), metadata.reply)
+        assertEquals("Recipient", metadata.replyToName)
+        val sent = service.readMessages(MessageQuery(MessageCategory.Comments, commentChannel = MessageCommentChannel.Sent)).items.single().comment!!
+        assertNull(sent.commenterUuid)
+        assertNull(sent.avatarUrl)
+        assertEquals(2, transport.requests.size)
+    }
+
+    @Test fun dynamicSubjectDoesNotBecomeAQuoteAndKeepsRootReply() = runTest {
+        val transport = Transport("""[{"comment_from":1,"dynamic_id":43,"dynamic_comment_id":8,"root_parent":6,
+            "dynamic_content":"Dynamic subject","dynamic_character_name":"Publisher","comment_uuid":123,
+            "to_uuid":true,"pic_url":"https://static.web.sdo.com/subject.png"}]""")
+        val message = service(transport).readMessages(MessageQuery(MessageCategory.Comments)).items.single()
+        assertEquals("", message.contextHtml)
+        assertTrue(message.imageUrls.isEmpty())
+        val metadata = requireNotNull(message.comment)
+        assertNull(metadata.quote)
+        assertNull(metadata.commenterUuid)
+        assertNull(metadata.replyToUuid)
+        assertEquals("Dynamic subject", metadata.subject.titleHtml)
+        assertEquals(MessageCommentReply(MessageTarget(MessageTargetKind.Dynamic, 43), 8, 6), metadata.reply)
+    }
+
+    @Test fun malformedOrUnsupportedCommentsCannotCreateReplyDestinations() = runTest {
+        val transport = Transport("[]")
+        for ((source, id, root) in listOf(Triple(2, "0", "0"), Triple(2, "2147483648", "0"),
+            Triple(2, "7", "-1"), Triple(2, "7", "2147483648"), Triple(4, "7", "0"), Triple(5, "7", "0"))) {
+            transport.data = """[{"comment_from":$source,"posts_id":42,"posts_comment_id":$id,"root_parent":$root,
+                "from_avatar":"https://example.invalid/avatar.png","cover_pic":"https://example.invalid/cover.png"}]"""
+            val metadata = service(transport).readMessages(MessageQuery(MessageCategory.Comments)).items.single().comment!!
+            assertNull(metadata.reply)
+            assertNull(metadata.avatarUrl)
+            assertNull(metadata.subject.coverUrl)
+        }
+    }
+
     @Test fun authorMetadataUsesEachOfficialHeaderFieldWithoutAnotherMessageRead() = runTest {
         val transport = Transport("[]")
         val service: MessageAuthorService = service(transport)
