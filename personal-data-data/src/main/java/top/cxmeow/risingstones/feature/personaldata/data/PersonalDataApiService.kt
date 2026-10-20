@@ -320,16 +320,16 @@ class PersonalDataApiService(
         }
 
     private fun ultimateSummary(row: JsonObject): UltimateEncounterSummary? {
-        val territory = row.int("territory_type", "territoryType") ?: return null
+        val territory = row.exactInt("territory_type", "territoryType") ?: return null
         if (UltimateEncounterCatalog.find(territory) == null) return null
         return UltimateEncounterSummary(
             territory,
-            row.int("clear_times", "clearTimes") ?: 0,
-            row.int("enter_before_clear", "enterBeforeClear"),
+            row.exactInt("clear_times", "clearTimes") ?: 0,
+            row.exactInt("enter_before_clear", "enterBeforeClear"),
             row.text("job_name", "jobName"),
             row.instant("log_time", "logTime"),
             row.long("elapsed_time", "elapsedTime"),
-            row.int("dead_times", "deadTimes"),
+            row.exactInt("dead_times", "deadTimes"),
         )
     }
 
@@ -443,6 +443,12 @@ private fun q(name: String, value: Any?) = RisingStonesApiQueryItem(name, value?
 private fun JsonObject.element(vararg names: String): JsonElement? =
     names.firstNotNullOfOrNull { this[it]?.takeUnless { value -> value is JsonNull } }
 private fun JsonObject.text(vararg names: String): String? = (element(*names) as? JsonPrimitive)?.contentOrNull
+/** Ultimate snapshot counts must not truncate fractions or clamp non-finite/overflow values. */
+private fun JsonObject.exactInt(vararg names: String): Int? =
+    (element(*names) as? JsonPrimitive)?.contentOrNull?.toBigDecimalOrNull()?.let { value ->
+        runCatching { value.intValueExact() }.getOrNull()
+    }
+
 private fun JsonObject.int(vararg names: String): Int? = (element(*names) as? JsonPrimitive)?.flexInt()
 private fun JsonObject.long(vararg names: String): Long? = (element(*names) as? JsonPrimitive)?.contentOrNull?.toLongOrNull()
 private fun JsonObject.boolean(vararg names: String): Boolean? =

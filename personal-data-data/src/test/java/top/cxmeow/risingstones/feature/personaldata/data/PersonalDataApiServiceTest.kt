@@ -166,6 +166,41 @@ class PersonalDataApiServiceTest {
         assertEquals("Parasol", result.glamour?.fashionAccessories?.first()?.name)
     }
 
+    private suspend fun numericUltimate(value: String, territory: String = "968") = service(object : RisingStonesHttpClient {
+        override suspend fun execute(request: RisingStonesHttpRequest): RisingStonesHttpResponse {
+            assertTrue(request.url.toHttpUrl().encodedPath.endsWith("gaoNanFirst1"))
+            val payload = """{"code":10000,"data":[{"territory_type":"$territory","clear_times":"$value","dead_times":"$value","enter_before_clear":"$value"}]}"""
+            return RisingStonesHttpResponse(200, emptyMap(), payload.encodeToByteArray())
+        }
+    }).fetchUltimateDashboard()
+
+    @Test
+    fun ultimateSummaryRejectsFractionalNonFiniteAndOverflowCounts() = runBlocking {
+        for (value in listOf("NaN", "Infinity", "-Infinity", "1.5", "2147483648", "-2147483649", "1e10000")) {
+            val summary = requireNotNull(numericUltimate(value).summary(968))
+            assertEquals(0, summary.clearTimes)
+            assertEquals(null, summary.deathsBeforeFirstClear)
+            assertEquals(null, summary.entersBeforeFirstClear)
+        }
+    }
+
+    @Test
+    fun ultimateSummaryKeepsExactIntegralNumericFormsIncludingZeroAndBoundary() = runBlocking {
+        for ((value, expected) in listOf("0" to 0, "41" to 41, "41.0" to 41, "4.1e1" to 41, "2147483647" to Int.MAX_VALUE)) {
+            val summary = requireNotNull(numericUltimate(value).summary(968))
+            assertEquals(expected, summary.clearTimes)
+            assertEquals(expected, summary.deathsBeforeFirstClear)
+            assertEquals(expected, summary.entersBeforeFirstClear)
+        }
+    }
+
+    @Test
+    fun ultimateSummaryDoesNotTruncateTerritoryIdentity() = runBlocking {
+        for (territory in listOf("968.5", "NaN", "Infinity", "2147483648")) {
+            assertTrue(numericUltimate("1", territory).summaries.isEmpty())
+        }
+    }
+
     private fun service(rising: RisingStonesHttpClient) = PersonalDataApiService(
         RisingStonesPublicApiClient(rising, listOf("https://rising.test")),
         PersonalDataCredential,
