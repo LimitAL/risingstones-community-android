@@ -21,7 +21,19 @@ import top.cxmeow.risingstones.network.RisingStonesPublicApiClient
 
 class PersonalDataMetricSemanticsTest {
     @Test
-    fun frontlineOverviewAndEachPeriodExposeIntegerPercentages() = runBlocking {
+    fun percentagePointsRetainSourceDecimalsBeforeDisplayRounding() = runBlocking {
+        for ((raw, expected) in listOf("0.375" to "37.5", "0.005" to "0.5", "0.8445" to "84.45", "0.9999" to "99.99", "0" to "0", "1" to "100")) {
+            for (jsonValue in listOf(raw, "\"$raw\"")) {
+                val fishing = service("fishTotal1" to """[{"succ_rate":$jsonValue}]""").fetchBoardContent(PersonalDataBoard.Fishing)
+                val frontline = service("frontline1TotalNew" to """[{"data_time":"v51","win_rate":$jsonValue}]""").fetchBoardContent(PersonalDataBoard.Frontline)
+                assertEquals("fishing raw=$jsonValue", percent("succ_rate", expected), fishing.metrics.single())
+                assertEquals("frontline raw=$jsonValue", percent("win_rate", expected), frontline.frontlinePeriods.single().metrics.single())
+            }
+        }
+    }
+
+    @Test
+    fun frontlineOverviewAndEachPeriodExposeExactPercentagePoints() = runBlocking {
         val content = service(
             "frontline1TotalNew" to """[
                 {"data_time":"v51","win_rate":"0.4"},
@@ -30,12 +42,12 @@ class PersonalDataMetricSemanticsTest {
             ]""",
         ).fetchBoardContent(PersonalDataBoard.Frontline)
 
-        assertEquals(percent("win_rate", "85"), content.metrics.single())
+        assertEquals(percent("win_rate", "84.5"), content.metrics.single())
         assertEquals(
             mapOf(
                 FrontlinePeriodKind.Since51 to percent("win_rate", "40"),
-                FrontlinePeriodKind.Total to percent("win_rate", "85"),
-                FrontlinePeriodKind.Last30Days to percent("win_rate", "100"),
+                FrontlinePeriodKind.Total to percent("win_rate", "84.5"),
+                FrontlinePeriodKind.Last30Days to percent("win_rate", "99.5"),
             ),
             content.frontlinePeriods.associate { it.kind to it.metrics.single() },
         )
@@ -43,12 +55,21 @@ class PersonalDataMetricSemanticsTest {
 
     @Test
     fun fishingUsesRatioConversionEvenWhenInputLooksLikeAnExistingPercentage() = runBlocking {
-        for ((raw, expected) in listOf("0" to "0", "1" to "100", "0.845" to "85", "84.5" to "8450")) {
+        for ((raw, expected) in listOf("0" to "0", "1" to "100", "0.845" to "84.5", "84.5" to "8450")) {
             val content = service("fishTotal1" to """[{"succ_rate":"$raw"}]""")
                 .fetchBoardContent(PersonalDataBoard.Fishing)
 
             assertEquals("raw=$raw", percent("succ_rate", expected), content.metrics.single())
         }
+    }
+
+    @Test
+    fun exactPercentageMappingDoesNotRoundAnOutOfRangeRatioIntoAValidBoundary() = runBlocking {
+        val raw = "1.00000000000000000001"
+        val value = service("fishTotal1" to """[{"succ_rate":"$raw"}]""").fetchBoardContent(PersonalDataBoard.Fishing).metrics.single()
+        assertEquals("100.000000000000000001", value.value)
+        assertEquals("8450", service("fishTotal1" to """[{"succ_rate":84.5}]""").fetchBoardContent(PersonalDataBoard.Fishing).metrics.single().value)
+        assertEquals("1E-997", service("fishTotal1" to """[{"succ_rate":"1e-999"}]""").fetchBoardContent(PersonalDataBoard.Fishing).metrics.single().value)
     }
 
     @Test
@@ -120,7 +141,7 @@ class PersonalDataMetricSemanticsTest {
         )
 
         assertEquals(
-            listOf(PersonalDataMetric("total_times", "12", PersonalDataMetricUnit.Times), percent("succ_rate", "85")),
+            listOf(PersonalDataMetric("total_times", "12", PersonalDataMetricUnit.Times), percent("succ_rate", "84.5")),
             service.fetchBoardContent(PersonalDataBoard.Fishing).metrics,
         )
         assertEquals(
@@ -227,7 +248,7 @@ class PersonalDataMetricSemanticsTest {
             """{"data":[{"succ_rate":"0.845"}]}""",
         )) {
             assertEquals(
-                listOf(percent("succ_rate", "85")),
+                listOf(percent("succ_rate", "84.5")),
                 service("fishTotal1" to data).fetchBoardContent(PersonalDataBoard.Fishing).metrics,
             )
         }

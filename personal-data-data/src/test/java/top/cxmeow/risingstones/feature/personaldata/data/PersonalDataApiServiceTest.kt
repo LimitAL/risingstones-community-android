@@ -91,7 +91,7 @@ class PersonalDataApiServiceTest {
         )
         assertFalse(frontline.sections.first().entries.first().fields.any { it.key == "character_id" })
         assertEquals("120", fishing.metrics.first().value)
-        assertEquals("85", fishing.metrics.single { it.id == "succ_rate" }.value)
+        assertEquals("84.5", fishing.metrics.single { it.id == "succ_rate" }.value)
         assertEquals("12", savage.metrics.first().value)
         assertEquals("302", glamour.metrics.single { it.id == "vanity_times" }.value)
 

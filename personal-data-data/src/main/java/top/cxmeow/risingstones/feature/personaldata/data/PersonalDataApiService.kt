@@ -312,7 +312,7 @@ class PersonalDataApiService(
                 ?.takeIf(String::isNotBlank) ?: return@mapNotNull null
             val value = when (definition.field) {
                 "gc_id" -> raw // The official value is a Grand Company name, not a numeric id.
-                "win_rate", "succ_rate" -> raw.fixedMetric(scale = 0, multiplier = 100.0)
+                "win_rate", "succ_rate" -> raw.percentagePoints()
                 "kda" -> raw.fixedMetric(scale = 2)
                 else -> raw.takeIf { it.toDoubleOrNull()?.isFinite() == true }
             } ?: return@mapNotNull null
@@ -431,6 +431,17 @@ private val entryTitleKeys = listOf(
     "name", "title", "label", "job_name", "territory_name", "fish_name", "item_name",
     "map_name", "achievement_name", "catalog_name", "Name", "log_time",
 )
+
+/** Preserve decimal ratio precision in percentage points; display rounding belongs to consumers.
+ * Keep the legacy finite/multiplication-overflow boundary and its out-of-range pass-through.
+ */
+private fun String.percentagePoints(): String? {
+    val number = toDoubleOrNull()?.takeIf(Double::isFinite) ?: return null
+    if (!(number * 100.0).isFinite()) return null
+    val points = toBigDecimalOrNull()?.scaleByPowerOfTen(2)?.stripTrailingZeros() ?: return null
+    // Avoid expanding tiny exponents into huge zero-filled strings; whole points stay familiar.
+    return if (points.scale() <= 0) points.toPlainString() else points.toString()
+}
 
 private fun String.fixedMetric(scale: Int, multiplier: Double = 1.0): String? {
     val number = toDoubleOrNull()?.takeIf(Double::isFinite) ?: return null

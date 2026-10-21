@@ -27,6 +27,8 @@ data class PersonalDataAvailability(val values: Map<String, String>) {
     }
 }
 
+/** Percent values use unrounded decimal percentage points (0.375 ratio -> "37.5"), not ratios.
+ * Consumers choose display rounding and must qualify their accepted range; no signature change. */
 data class PersonalDataMetric(
     val id: String,
     val value: String,
