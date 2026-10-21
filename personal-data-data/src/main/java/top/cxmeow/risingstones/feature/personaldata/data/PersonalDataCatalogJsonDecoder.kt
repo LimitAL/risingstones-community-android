@@ -40,8 +40,7 @@ class PersonalDataCatalogJsonDecoder(
         val seriesRows = document(savageDocument)?.objectValue("content")?.arrayValue("series").orEmpty()
         val savageSeries = seriesRows.mapNotNull(JsonElement::toSavageSeries)
         val glamourContent = document(glamourDocument)?.objectValue("content")
-        return PersonalDataOfficialCatalogs(
-            fish = fishRows.mapNotNull { element ->
+        val decodedFish = fishRows.mapNotNull { element ->
                 val item = element as? JsonObject ?: return@mapNotNull null
                 val id = item.intValue("itemId", "item_id") ?: return@mapNotNull null
                 id to FishKingCatalogEntry(
@@ -50,7 +49,13 @@ class PersonalDataCatalogJsonDecoder(
                     name = item.textValue("name").orEmpty(),
                     patch = item.textValue("patch").orEmpty(),
                 )
-            }.toMap(),
+            }
+
+        return PersonalDataOfficialCatalogs(
+            // A lossy subset is not a directory: preserve absence rather than invent a denominator.
+            fish = decodedFish.takeIf { rows ->
+                rows.size == fishRows.size && rows.map { it.first }.distinct().size == rows.size
+            }?.toMap().orEmpty(),
             savageRaids = savageSeries
                 .flatMap(SavageRaidCatalogSeries::tiers)
                 .flatMap(SavageRaidCatalogTier::raids)
