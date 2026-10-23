@@ -656,6 +656,35 @@ class DynamicApiServiceTest {
         catch (_: DynamicException.AuthenticationRequired) { }
     }
 
+    @Test fun commentTotalsKeepMissingZeroValidAndMalformedDistinct() = runTest {
+        val transport=Transport();val service=service(transport)
+        for ((value,expected) in listOf(null to null,"null" to null,"0" to 0,"\"37\"" to 37,
+            "-1" to null,"2.5" to null,"true" to null,"\"bad\"" to null,"2147483648" to null)) {
+            transport.body="""{"code":10000,"data":{"rows":[{"id":3}],${if(value==null) "\"ignored\":0" else "\"count\":$value"}}}"""
+            val root=service.fetchComments(1,DynamicListQuery(limit=1))
+            val reply=service.fetchReplies(3,DynamicListQuery(limit=1))
+            assertEquals(value,expected,root.total);assertEquals(expected,reply.total)
+            assertEquals(expected?.let{it>1}?:true,root.hasMore)
+            assertEquals(1,root.items.size)
+        }
+    }
+    @Test fun scopedReadsCarryTotalsWithoutChangingWriteScope() = runTest {
+        val transport=Transport().apply{body="""{"code":10000,"data":{"count":0,"rows":[]}}"""}
+        val service=service(transport);val scope=service.beginActionScope()
+        assertEquals(0,service.fetchComments(scope,1,DynamicListQuery()).total)
+        transport.body="""{"code":10000,"data":{"count":91,"rows":[{"id":3,"uuid":"mock"}]}}"""
+        assertEquals(91,service.fetchReplies(scope,3,DynamicListQuery()).total)
+        assertTrue(transport.requests.all{it.method==RisingStonesHttpMethod.Get})
+    }
+    @Test fun lastPageTotalAndLargePageArithmeticAreSourceBased() = runTest {
+        val transport=Transport().apply{body="""{"code":10000,"data":{"count":2147483647,"rows":[]}}"""}
+        val page=service(transport).fetchReplies(3,DynamicListQuery(Int.MAX_VALUE,100))
+        assertEquals(Int.MAX_VALUE,page.total);assertFalse(page.hasMore)
+        transport.body="""{"code":10000,"data":{"count":11,"rows":[{"id":3}]}}"""
+        val last=service(transport).fetchComments(1,DynamicListQuery(2,10))
+        assertEquals(11,last.total);assertFalse(last.hasMore);assertEquals(1,last.items.size)
+    }
+
     private fun service(transport: Transport, provider: Provider = Provider()) = DynamicApiService(client(transport), provider)
     private fun client(transport: Transport) = RisingStonesPublicApiClient(transport, listOf("https://rising.test"))
 

@@ -35,7 +35,14 @@ data class DynamicUiState(
     val repliesHaveMore: Set<Int> = emptySet(),
 )
 
+/** Latest successful list-response counts, scoped to a selected dynamic; null means unknown. */
+data class DynamicCommentPageTotals(val selectedId: Int? = null, val roots: Int? = null,
+    val replies: Map<Int, Int?> = emptyMap())
+
 class DynamicViewModel(private val service: DynamicService) : ViewModel() {
+    // Separate additive API preserves the existing DynamicUiState constructor/copy ABI.
+    private val mutableCommentTotals = MutableStateFlow(DynamicCommentPageTotals())
+    val commentTotals = mutableCommentTotals.asStateFlow()
     private val mutableState = MutableStateFlow(DynamicUiState())
     val state = mutableState.asStateFlow()
     private var feedJob: Job? = null
@@ -64,6 +71,7 @@ class DynamicViewModel(private val service: DynamicService) : ViewModel() {
         cancelDetails()
         feedCursor = null
         detailHistory.clear()
+        mutableCommentTotals.value = DynamicCommentPageTotals()
         mutableState.value = DynamicUiState()
     }
 
@@ -129,6 +137,7 @@ class DynamicViewModel(private val service: DynamicService) : ViewModel() {
         require(id > 0)
         mutableState.update { it.copy(canNavigateBackInDetail = detailHistory.isNotEmpty()) }
         if (state.value.selectedId == id) return
+        mutableCommentTotals.value = DynamicCommentPageTotals(selectedId = id)
         mutableState.update { it.copy(selectedId = id, detail = null, detailStatus = DynamicLoadStatus.Idle,
             comments = emptyList(), replies = emptyMap()) }
         refreshDetail()
@@ -141,6 +150,7 @@ class DynamicViewModel(private val service: DynamicService) : ViewModel() {
         }
         detailGeneration++
         cancelDetails()
+        mutableCommentTotals.value = DynamicCommentPageTotals()
         mutableState.update { it.copy(selectedId = null, detail = null, comments = emptyList(), replies = emptyMap()) }
     }
 
@@ -187,6 +197,8 @@ class DynamicViewModel(private val service: DynamicService) : ViewModel() {
             if (generation != detailGeneration) return
             commentCursor = page.pageTime ?: commentCursor
             failedCommentPage = null
+            mutableCommentTotals.update { it.copy(roots = page.total,
+                replies = if (pageNumber == 1) emptyMap() else it.replies) }
             mutableState.update {
                 it.copy(comments = ((if (pageNumber == 1) emptyList() else it.comments) + page.items)
                     .distinctBy(DynamicComment::id), commentsPage = page.page,
@@ -215,6 +227,7 @@ class DynamicViewModel(private val service: DynamicService) : ViewModel() {
                 if (generation != detailGeneration) return@launch
                 replyPages[rootId] = page.page
                 replyCursors[rootId] = page.pageTime
+                mutableCommentTotals.update { it.copy(replies = it.replies + (rootId to page.total)) }
                 mutableState.update { it.copy(replies = it.replies + (rootId to
                     (it.replies[rootId].orEmpty() + page.items).distinctBy(DynamicComment::id)),
                     loadingReplies = it.loadingReplies - rootId,

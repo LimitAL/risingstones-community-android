@@ -162,8 +162,9 @@ internal fun <T> JsonObject.page(query: DynamicListQuery, map: (JsonObject) -> T
         ?: throw DynamicException.InvalidResponse }
     val page = query.page.coerceAtLeast(1)
     val limit = query.limit.coerceIn(1, 100)
-    return DynamicPage(mapped, page, number("count")?.let { page * limit < it }
-        ?: (rows.size >= limit), text("pageTime"))
+    val total = number("count")?.takeIf { it >= 0 }
+    return DynamicPage(mapped, page, total?.let { page.toLong() * limit < it }
+        ?: (rows.size >= limit), text("pageTime"), total)
 }
 
 private fun entry(value: JsonObject): DynamicEntry? {

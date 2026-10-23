@@ -11,6 +11,35 @@ import top.cxmeow.risingstones.feature.dynamic.domain.*
 class DynamicViewModelTest {
     @get:Rule val dispatcher = MainDispatcherRule()
 
+    @Test fun lateCountsCannotCrossSelectionOrSessionClear() = runTest {
+        val service=Service().apply{rootTotal=40;delayedComments=CompletableDeferred()}
+        val model=DynamicViewModel(service);model.select(1);runCurrent()
+        service.rootTotal=7;model.select(2);runCurrent();service.delayedComments!!.complete(Unit);advanceUntilIdle()
+        assertEquals(2,model.commentTotals.value.selectedId);assertEquals(7,model.commentTotals.value.roots)
+        service.delayedReplies=CompletableDeferred();service.replyTotal=99;model.loadReplies(2);runCurrent()
+        model.clearProtectedContent();service.delayedReplies!!.complete(Unit);advanceUntilIdle()
+        assertEquals(DynamicCommentPageTotals(),model.commentTotals.value)
+    }
+    @Test fun pageTwoMissingCountDoesNotCarryFirstPageTotal() = runTest {
+        val service=Service().apply{rootTotal=40;rootHasMore=true};val model=DynamicViewModel(service)
+        model.select(1);advanceUntilIdle();service.rootTotal=null;model.loadMoreComments();advanceUntilIdle()
+        assertEquals(listOf(1,2),service.commentPages);assertNull(model.commentTotals.value.roots)
+        service.rootTotal=0;model.refreshDetail();advanceUntilIdle();assertEquals(0,model.commentTotals.value.roots)
+    }
+
+    @Test fun listTotalsRemainSeparateFromHeaderAndClearOnSuccessWithoutMetadata() = runTest {
+        val service=Service();service.rootTotal=40;service.replyTotal=8
+        val model=DynamicViewModel(service);model.select(1);advanceUntilIdle();model.loadReplies(1);advanceUntilIdle()
+        assertEquals(1,model.state.value.detail!!.commentCount);assertEquals(40,model.commentTotals.value.roots)
+        assertEquals(8,model.commentTotals.value.replies[1]);assertEquals(1,model.state.value.comments.size)
+        service.failComments=true;model.refreshDetail();advanceUntilIdle();assertEquals(40,model.commentTotals.value.roots)
+        service.failComments=false;service.rootTotal=null;model.refreshDetail();advanceUntilIdle()
+        assertNull(model.commentTotals.value.roots);assertTrue(model.commentTotals.value.replies.isEmpty())
+        service.rootTotal=0;model.refreshDetail();advanceUntilIdle();assertEquals(0,model.commentTotals.value.roots)
+        model.select(2);assertEquals(2,model.commentTotals.value.selectedId);assertNull(model.commentTotals.value.roots)
+        model.clearProtectedContent();assertEquals(DynamicCommentPageTotals(),model.commentTotals.value)
+    }
+
     @Test
     fun refreshRetainsContentAndPaginationRetriesWithSameCursor() = runTest {
         val service = Service()
@@ -111,6 +140,11 @@ class DynamicViewModelTest {
 
 private class Service : DynamicService {
     override val canRead = true
+    var rootHasMore=false
+    var delayedComments:CompletableDeferred<Unit>?=null
+    var delayedReplies:CompletableDeferred<Unit>?=null
+    var rootTotal: Int? = null
+    var replyTotal: Int? = null
     var failFeed = false
     var failComments = false
     var authFailure = false
@@ -131,11 +165,15 @@ private class Service : DynamicService {
     }
     override suspend fun fetchComments(id: Int, query: DynamicListQuery): DynamicPage<DynamicComment> {
         commentPages += query.page
+        val captured=rootTotal
+        if(id==1)withContext(NonCancellable){delayedComments?.await()}
         if (failComments) throw DynamicException.Network
-        return DynamicPage(listOf(comment(id)), query.page, false)
+        return DynamicPage(listOf(comment(id)), query.page, rootHasMore, total=captured)
     }
-    override suspend fun fetchReplies(rootParentId: Int, query: DynamicListQuery) =
-        DynamicPage(listOf(comment(100)), query.page, false)
+    override suspend fun fetchReplies(rootParentId: Int, query: DynamicListQuery):DynamicPage<DynamicComment> {
+        val captured=replyTotal;withContext(NonCancellable){delayedReplies?.await()}
+        return DynamicPage(listOf(comment(100)), query.page, false, total=captured)
+    }
 }
 private val Author = DynamicAuthor("fixture", "Member", "Area", "World", null)
 private fun entry(id: Int) = DynamicEntry(id, Author, "<p>Activity $id</p>", emptyList(), null, 1, 0, false, null)
