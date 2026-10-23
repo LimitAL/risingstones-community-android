@@ -14,6 +14,7 @@ class OfficialForumCommentBreakTest(private val html: String, private val expect
     @Test fun displayedTextSegmentsFollowTheSameBreaks() {
         val text = OfficialForumHtml.richSegments(html).joinToString("") {
             when (it) {
+                is OfficialForumRichTextSegment.Mention -> it.text
                 is OfficialForumRichTextSegment.Text -> it.value
                 is OfficialForumRichTextSegment.Link -> it.text
                 is OfficialForumRichTextSegment.Emoji -> "[emo${it.number}]"

@@ -83,6 +83,8 @@ data class OfficialForumPostSummary(
 
 sealed interface OfficialForumRichTextSegment {
     data class Text(val value: String) : OfficialForumRichTextSegment
+    /** Explicit official user identity; never an executable URL or a name-based lookup. */
+    data class Mention(val userId: String, val characterName: String, val text: String) : OfficialForumRichTextSegment
     data class Emoji(val number: Int) : OfficialForumRichTextSegment
     data class Link(val text: String, val url: String) : OfficialForumRichTextSegment
     data class Image(val url: String, val width: Int?, val height: Int?) : OfficialForumRichTextSegment

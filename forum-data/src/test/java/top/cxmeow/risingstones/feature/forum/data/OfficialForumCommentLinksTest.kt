@@ -7,7 +7,7 @@ import top.cxmeow.risingstones.feature.forum.domain.OfficialForumRichTextSegment
 class OfficialForumCommentLinksTest {
     private fun links(html: String) = OfficialForumHtml.richSegments(html).filterIsInstance<Segment.Link>()
     private fun display(html: String) = OfficialForumHtml.richSegments(html).joinToString("") {
-        when (it) { is Segment.Text -> it.value; is Segment.Link -> it.text; is Segment.Emoji -> "[emo${it.number}]"; is Segment.Image -> "" }
+        when (it) { is Segment.Mention -> it.text; is Segment.Text -> it.value; is Segment.Link -> it.text; is Segment.Emoji -> "[emo${it.number}]"; is Segment.Image -> "" }
     }
     @Test fun bareUrlsBecomeLinksWithoutChangingVisibleText() {
         val samples = listOf("Text https://example.test/mock", "中文https://example.test/mock，尾", "繁體（https://example.test/mock）", "HTTPS://example.test/mock", "https://example.test/mock?a=1&amp;b=2")

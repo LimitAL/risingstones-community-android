@@ -66,6 +66,39 @@ internal object OfficialForumHtml {
         }
     }
 
+    private data class FlowToken(val start: Int, val end: Int, val value: String, val mention: OfficialForumRichTextSegment.Mention? = null)
+    private val spanTagRegex = Regex("""</?span\b[^>]*>""", RegexOption.IGNORE_CASE)
+
+    /** Only explicit official span metadata creates users; balanced nested spans are consumed once. */
+    private fun mentionTokens(html: String): List<FlowToken> {
+        val tags = spanTagRegex.findAll(html).toList()
+        val result = mutableListOf<FlowToken>()
+        var consumed = 0
+        for ((index, tag) in tags.withIndex()) {
+            if (tag.range.first < consumed || tag.value.startsWith("</") || tag.value.endsWith("/>")) continue
+            fun attribute(name: String): String? = Regex("""(?:^|\s)$name\s*=\s*(["'])(.*?)\1""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+                .find(tag.value)?.groupValues?.get(2)
+            val classes = attribute("class")?.split(Regex("""\s+""")).orEmpty()
+            val value = when { "at-text" in classes -> attribute("data-uuid"); "mention" in classes -> attribute("data-id"); else -> null } ?: continue
+            val parts = decodeEntities(value).split('#', limit = 2)
+            val id = parts[0].trim()
+            if (id.isEmpty() || !id.all { it.isLetterOrDigit() || it == '_' || it == '-' }) continue
+            var depth = 1
+            var close: MatchResult? = null
+            for (next in tags.drop(index + 1)) {
+                depth += if (next.value.startsWith("</")) -1 else if (next.value.endsWith("/>")) 0 else 1
+                if (depth == 0) { close = next; break }
+            }
+            val closing = close ?: continue
+            val name = parts.getOrElse(1) { "" }
+            val text = if (name.isNotEmpty()) "@$name" else plainText(html.substring(tag.range.last + 1, closing.range.first))
+            if (text.isEmpty()) continue
+            consumed = closing.range.last + 1
+            result += FlowToken(tag.range.first, consumed, html.substring(tag.range.first, consumed), OfficialForumRichTextSegment.Mention(id, name, text))
+        }
+        return result
+    }
+
     /** Passive token flow, not a DOM/execution engine. Breaks are normalized once across inline atoms. */
     private fun normalizedContent(html: String, rich: Boolean, entitiesDecoded: Boolean = false): List<OfficialForumRichTextSegment> {
         val result = mutableListOf<OfficialForumRichTextSegment>()
@@ -123,9 +156,13 @@ internal object OfficialForumHtml {
             pendingBreaks = maxOf(pendingBreaks, minimum)
         }
         var cursor = 0
-        val tokens = if (rich) richFlowRegex else flowBreakRegex
-        for (match in tokens.findAll(html)) {
-            appendHtml(html.substring(cursor, match.range.first))
+        val pattern = if (rich) richFlowRegex else flowBreakRegex
+        val tokens = (pattern.findAll(html).map { FlowToken(it.range.first, it.range.last + 1, it.value) }.toList() +
+            if (rich) mentionTokens(html) else emptyList()).sortedWith(compareBy<FlowToken> { it.start }.thenByDescending { it.end })
+        for (match in tokens) {
+            if (match.start < cursor) continue // Outermost anchor/mention owns its complete body.
+            appendHtml(html.substring(cursor, match.start))
+            if (match.mention != null) { finishText(); line += match.mention; cursor = match.end; continue }
             val escaped = match.value.startsWith("&lt;", true)
             val token = if (escaped) decodeEntities(match.value) else match.value
             val name = tagNameRegex.find(token)?.groupValues?.get(1)?.lowercase().orEmpty()
@@ -149,7 +186,7 @@ internal object OfficialForumHtml {
                     if (name == "pre") preDepth = if (token.startsWith("</")) maxOf(0, preDepth - 1) else preDepth + 1
                 }
             }
-            cursor = match.range.last + 1
+            cursor = match.end
         }
         appendHtml(html.substring(cursor))
         flushLine()

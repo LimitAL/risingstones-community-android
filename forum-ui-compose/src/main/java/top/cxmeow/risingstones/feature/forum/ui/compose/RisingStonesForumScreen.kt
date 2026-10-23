@@ -1086,6 +1086,7 @@ private fun ForumRichSegments(
     ) {
         segments.forEach { segment ->
             when (segment) {
+                is OfficialForumRichTextSegment.Mention -> Text(segment.text, style = textStyle, color = textColor)
                 is OfficialForumRichTextSegment.Text -> Text(
                     text = segment.value,
                     style = textStyle,
@@ -1493,6 +1494,7 @@ private fun ForumRetry(
 private fun richText(segments: List<OfficialForumRichTextSegment>): String =
     segments.joinToString(separator = "") { segment ->
         when (segment) {
+            is OfficialForumRichTextSegment.Mention -> segment.text
             is OfficialForumRichTextSegment.Text -> segment.value
             is OfficialForumRichTextSegment.Emoji -> "[emo${segment.number}]"
             is OfficialForumRichTextSegment.Link -> segment.text
