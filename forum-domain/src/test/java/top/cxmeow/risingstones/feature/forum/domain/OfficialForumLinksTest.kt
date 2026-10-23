@@ -64,6 +64,20 @@ class OfficialForumLinksTest {
     }
 
     @Test
+    fun nonPostEntitiesAndUnknownDetailsAreNeverPostIds() {
+        val routes = listOf(
+            "glamour/detail/293183",
+            "dynamic/detail/880021",
+            "recruit/guild/detail/312",
+            "recruit/roleplay/detail/77",
+            "unknown/detail/42",
+        )
+        routes.forEach { route ->
+            assertNull(route, OfficialForumLinkParser.postId("https://ff14risingstones.web.sdo.com/pc/index.html#/$route"))
+        }
+    }
+
+    @Test
     fun buildsOfficialEmojiResourceUrl() {
         assertEquals(
             "https://static.web.sdo.com/jijiamobile/pic/ff14/2023ffstone/emo46.png",

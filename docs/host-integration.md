@@ -894,3 +894,15 @@ COS 主机隔离默认头、CookieJar 及拦截器，写请求禁用自动重试
 ## 旧勋章摘要消费者的二进制入口
 
 添加可选data-class字段仅保证重编译后的源码兼容，不会自动保留原JVM构造器与copy签名。本次补保AccountDashboard原五参构造、显式copy及原默认copy mask入口；旧copy同时保留新增只读wall。已使用勋章前模型编译旧消费者并在实际本地Maven AAR上运行，还以无组合构建的独立消费者验证新增类型。详见[本地Maven/ABI补查](checkpoints/account-medal-abi-20261019.md)。本次Maven写入仅SDK build/repository的独立本地版本，未向外部分发。
+
+
+## 官方网页实体链接
+
+`OfficialForumLinkParser.target(url)` 返回 `OfficialForumLinkTarget(kind, id)`，覆盖帖子／攻略、
+幻化、动态、部队招募与角色扮演招募。接入方将类型映射到已有原生目的地；未知页面继续使用
+既有外部链接处理。只识别原有两项官方域名的 HTTPS 链接，不扩展域名或协议。
+
+兼容入口 `postId(url)` 只为帖子／攻略返回 ID，其他实体返回 null，避免把同名 `detail` 路由
+误当帖子。已验证的旧 `/detail/<id>`、`posts/detail/<id>`、`post?id=<id>` 形态保留；未知页面
+的 `id` 参数不作为帖子资格，明确实体路径也不会被无关查询 ID 覆盖。编码按路径段解码一次，
+编码分隔符不会生成新的路径层级。参考界面未接入其他原生目的地时，非帖子链接继续外部回退。
