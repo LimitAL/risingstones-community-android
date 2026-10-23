@@ -169,7 +169,7 @@ class DynamicPublishingViewModel(
         if (!editable || !canPublish) return
         val snapshot = state.value
         val prepared = snapshot.editor.preparePublishingContent()
-        if (snapshot.relayPostId == null && prepared.html.isBlank()) {
+        if (snapshot.relayPostId == null && prepared.html.isBlank() && snapshot.images.isEmpty()) {
             mutableState.update { it.copy(error = DynamicPublishingError.ContentRequired) }
             return
         }

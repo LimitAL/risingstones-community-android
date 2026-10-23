@@ -39,16 +39,17 @@ class DynamicPublishingViewModelTest {
         assertEquals(0, sources.first().reads)
     }
 
-    @Test fun imageOnlyOriginalCannotUploadOrPublish() = runTest {
+    @Test fun imageOnlyOriginalUsesExistingExplicitScopedUploadAndPublishing() = runTest {
         val service = PublishingFixture()
         val model = DynamicPublishingViewModel(service, service, service)
         val source = ImageSource(1)
         model.addImages(listOf(source))
         model.submit()
         advanceUntilIdle()
-        assertEquals(DynamicPublishingError.ContentRequired, model.state.value.error)
-        assertEquals(0, source.reads)
-        assertTrue(service.published.isEmpty())
+        assertNull(model.state.value.error)
+        assertEquals(1, source.reads)
+        assertEquals("", service.published.single().contentHtml)
+        assertEquals(1, service.published.single().images.size)
     }
 
     @Test fun explicitRetryReusesSuccessfulUploadsAfterReordering() = runTest {

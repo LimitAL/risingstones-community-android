@@ -67,7 +67,7 @@ data class DynamicPublishDraft(
     val images: List<DynamicUploadedImage> = emptyList(),
 ) {
     init {
-        require(contentHtml.isNotEmpty())
+        require(contentHtml.isNotEmpty() || images.isNotEmpty())
         require(images.size <= MaximumPublishingImageCount)
     }
 }
