@@ -13,11 +13,6 @@ internal object OfficialForumHtml {
         setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
     )
     private val emojiRegex = Regex("""\[emo([1-9]|[1-3][0-9]|4[0-6])]""")
-    private val breakRegex = Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE)
-    private val blockRegex = Regex(
-        """</?(?:p|div|li|h[1-6]|blockquote|pre)\b[^>]*>""",
-        RegexOption.IGNORE_CASE,
-    )
     private val tagRegex = Regex("""<[^>]+>""")
     private val openingParagraphRegex = Regex("""<(?:p|div|li|h[1-6]|blockquote|pre)\b[^>]*>""", RegexOption.IGNORE_CASE)
     private val closingParagraphRegex = Regex("""</(?:p|div|li|h[1-6]|blockquote|pre)\s*>""", RegexOption.IGNORE_CASE)
@@ -45,32 +40,112 @@ internal object OfficialForumHtml {
         }.distinct()
     }
 
-    fun plainText(html: String): String = decodeEntities(
-        tagRegex.replace(blockRegex.replace(breakRegex.replace(html, "\n"), "\n"), ""),
-    ).lineSequence().map(String::trim).filter(String::isNotEmpty).joinToString("\n\n")
+    private val flowBreakRegex = Regex(
+        """<br\b[^>]*>|</?(?:p|div|li|h[1-6]|blockquote|pre|ul|ol)\b[^>]*>""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val richFlowRegex = Regex(
+        """<img\b[^>]*>|<a\b[^>]*href\s*=\s*["'][^"']+["'][^>]*>.*?</a\s*>|${flowBreakRegex.pattern}""",
+        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+    )
+    private val htmlPresenceRegex = Regex("""<[A-Za-z/!][^>]*>""")
+    private val sourceNewlineRegex = Regex("""\r\n?|\n""")
+    private val tagNameRegex = Regex("""^</?([A-Za-z][A-Za-z0-9]*)""")
 
-    fun richSegments(html: String): List<OfficialForumRichTextSegment> {
-        val withBreaks = blockRegex.replace(breakRegex.replace(html, "\n"), "\n")
-        val result = mutableListOf<OfficialForumRichTextSegment>()
-        val tokens = Regex(
-            """<img\b[^>]*>|<a\b[^>]*href\s*=\s*[\"'][^\"']+[\"'][^>]*>.*?</a\s*>""",
-            setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
-        )
-        var start = 0
-        tokens.findAll(withBreaks).forEach { match ->
-            appendPlain(withBreaks.substring(start, match.range.first), result)
-            if (match.value.startsWith("<img", ignoreCase = true)) {
-                imageSegment(match.value)?.let(result::add)
-            } else {
-                val anchor = anchorRegex.matchEntire(match.value)
-                val text = anchor?.groupValues?.getOrNull(2)?.let(::plainText).orEmpty()
-                val url = anchor?.groupValues?.getOrNull(1)?.let(::decodeEntities)?.let(::remoteUrl)
-                if (text.isNotEmpty() && url != null) result += OfficialForumRichTextSegment.Link(text, url)
-                else appendPlain(match.value, result)
-            }
-            start = match.range.last + 1
+    fun plainText(html: String): String = normalizedContent(html, rich = false)
+        .filterIsInstance<OfficialForumRichTextSegment.Text>().joinToString("") { it.value }
+
+    fun richSegments(html: String): List<OfficialForumRichTextSegment> = buildList {
+        normalizedContent(html, rich = true).forEach { segment ->
+            if (segment is OfficialForumRichTextSegment.Text) appendEmojiText(segment.value, this)
+            else add(segment)
         }
-        appendPlain(withBreaks.substring(start), result)
+    }
+
+    /** Passive token flow, not a DOM/execution engine. Breaks are normalized once across inline atoms. */
+    private fun normalizedContent(html: String, rich: Boolean): List<OfficialForumRichTextSegment> {
+        val result = mutableListOf<OfficialForumRichTextSegment>()
+        val outputText = StringBuilder()
+        val line = mutableListOf<OfficialForumRichTextSegment>()
+        val lineText = StringBuilder()
+        val hasHtml = htmlPresenceRegex.containsMatchIn(html)
+        var preDepth = 0
+        var pendingBreaks = 0
+        var hasOutput = false
+
+        fun emit(segment: OfficialForumRichTextSegment) {
+            if (segment is OfficialForumRichTextSegment.Text) outputText.append(segment.value)
+            else {
+                if (outputText.isNotEmpty()) { result += OfficialForumRichTextSegment.Text(outputText.toString()); outputText.clear() }
+                result += segment
+            }
+        }
+        fun finishText() {
+            if (lineText.isNotEmpty()) { line += OfficialForumRichTextSegment.Text(lineText.toString()); lineText.clear() }
+        }
+        fun flushLine(): Boolean {
+            finishText()
+            while (line.firstOrNull() is OfficialForumRichTextSegment.Text) {
+                val value = (line.first() as OfficialForumRichTextSegment.Text).value.trimStart()
+                if (value.isEmpty()) line.removeAt(0) else { line[0] = OfficialForumRichTextSegment.Text(value); break }
+            }
+            while (line.lastOrNull() is OfficialForumRichTextSegment.Text) {
+                val value = (line.last() as OfficialForumRichTextSegment.Text).value.trimEnd()
+                if (value.isEmpty()) line.removeAt(line.lastIndex) else { line[line.lastIndex] = OfficialForumRichTextSegment.Text(value); break }
+            }
+            if (line.isEmpty()) return false
+            if (hasOutput && pendingBreaks > 0) outputText.append("\n".repeat(pendingBreaks))
+            line.forEach(::emit)
+            line.clear()
+            hasOutput = true
+            pendingBreaks = 0
+            return true
+        }
+        fun appendDecoded(value: String) {
+            for (character in sourceNewlineRegex.replace(value, "\n")) {
+                if (character == '\n') {
+                    val visibleLine = flushLine()
+                    pendingBreaks = if (visibleLine) 1 else pendingBreaks + 1
+                } else lineText.append(character)
+            }
+        }
+        fun appendHtml(value: String) {
+            val source = sourceNewlineRegex.replace(value, if (hasHtml && preDepth == 0) " " else "\n")
+            appendDecoded(decodeEntities(tagRegex.replace(source, "")))
+        }
+        fun boundary(minimum: Int) {
+            flushLine()
+            pendingBreaks = maxOf(pendingBreaks, minimum)
+        }
+        var cursor = 0
+        val tokens = if (rich) richFlowRegex else flowBreakRegex
+        for (match in tokens.findAll(html)) {
+            appendHtml(html.substring(cursor, match.range.first))
+            val token = match.value
+            val name = tagNameRegex.find(token)?.groupValues?.get(1)?.lowercase().orEmpty()
+            when (name) {
+                "br" -> { val visibleLine = flushLine(); pendingBreaks = if (visibleLine) 1 else pendingBreaks + 1 }
+                "img" -> imageSegment(token)?.let { finishText(); line += it }
+                "a" -> {
+                    val anchor = anchorRegex.matchEntire(token)
+                    val text = anchor?.groupValues?.get(2)?.let { body ->
+                        plainText(sourceNewlineRegex.replace(body, if (preDepth == 0) " " else "\n"))
+                    }.orEmpty()
+                    val url = anchor?.groupValues?.get(1)?.let(::decodeEntities)?.let(::remoteUrl)
+                    if (text.isNotEmpty() && url != null) { finishText(); line += OfficialForumRichTextSegment.Link(text, url) }
+                    else appendDecoded(text)
+                }
+                "div", "li" -> boundary(1)
+                else -> {
+                    boundary(2)
+                    if (name == "pre") preDepth = if (token.startsWith("</")) maxOf(0, preDepth - 1) else preDepth + 1
+                }
+            }
+            cursor = match.range.last + 1
+        }
+        appendHtml(html.substring(cursor))
+        flushLine()
+        if (outputText.isNotEmpty()) result += OfficialForumRichTextSegment.Text(outputText.toString())
         return result
     }
 
@@ -129,10 +204,8 @@ internal object OfficialForumHtml {
     }
 
     private fun appendParagraphs(html: String, blocks: MutableList<OfficialForumPostBodyBlock>) {
-        val normalized = closingParagraphRegex.replace(
-            openingParagraphRegex.replace(breakRegex.replace(html, "\n"), ""),
-            "\n\n",
-        )
+        // Keep opening-tag context and explicit BR tokens until the one-pass formatter.
+        val normalized = closingParagraphRegex.replace(html, "\n\n")
         normalized.split(Regex("""\n\s*\n""")).forEach { fragment ->
             val segments = richSegments(fragment)
             if (segments.isEmpty()) return@forEach
@@ -141,7 +214,7 @@ internal object OfficialForumHtml {
             if (images.isNotEmpty() && !textOnly && segments.size == images.size) {
                 images.forEach { blocks += OfficialForumPostBodyBlock.Image(it.url, it.width, it.height) }
             } else {
-                val isCallout = fragment.contains("collapse_btn", true)
+                val isCallout = openingParagraphRegex.replace(fragment, "").contains("collapse_btn", true)
                 blocks += if (isCallout) OfficialForumPostBodyBlock.Callout(segments)
                 else OfficialForumPostBodyBlock.Paragraph(segments)
             }
@@ -173,8 +246,7 @@ internal object OfficialForumHtml {
         return styleDimensionRegex.pattern.format(name).toRegex(RegexOption.IGNORE_CASE).find(style)?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.takeIf { it > 0 }?.toInt()
     }
 
-    private fun appendPlain(html: String, result: MutableList<OfficialForumRichTextSegment>) {
-        val text = plainText(html)
+    private fun appendEmojiText(text: String, result: MutableList<OfficialForumRichTextSegment>) {
         var start = 0
         emojiRegex.findAll(text).forEach { match ->
             text.substring(start, match.range.first).takeIf(String::isNotEmpty)?.let {
