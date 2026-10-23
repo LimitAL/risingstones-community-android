@@ -44,8 +44,12 @@ internal object OfficialForumHtml {
         """<br\b[^>]*>|</?(?:p|div|li|h[1-6]|blockquote|pre|ul|ol)\b[^>]*>""",
         RegexOption.IGNORE_CASE,
     )
+    private val escapedAnchorPattern = """&lt;a\b(?:(?!&gt;).)*&gt;.*?&lt;/a\s*&gt;"""
+    private val literalAnchorRegex = Regex("""<a\b.*?</a\s*>|$escapedAnchorPattern""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+    private val nestedAnchorRegex = Regex("""(?:<|&lt;)a\b""", RegexOption.IGNORE_CASE)
+    private val bareUrlRegex = Regex("""(?<![A-Za-z0-9_:/="'@])https?://[A-Za-z0-9\-._~:/?#@!$&'*+,;=%()]+""", RegexOption.IGNORE_CASE)
     private val richFlowRegex = Regex(
-        """<img\b[^>]*>|<a\b[^>]*href\s*=\s*["'][^"']+["'][^>]*>.*?</a\s*>|${flowBreakRegex.pattern}""",
+        """$escapedAnchorPattern|<img\b[^>]*>|<a\b[^>]*href\s*=\s*["'][^"']+["'][^>]*>.*?</a\s*>|${flowBreakRegex.pattern}""",
         setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
     )
     private val htmlPresenceRegex = Regex("""<[A-Za-z/!][^>]*>""")
@@ -57,13 +61,13 @@ internal object OfficialForumHtml {
 
     fun richSegments(html: String): List<OfficialForumRichTextSegment> = buildList {
         normalizedContent(html, rich = true).forEach { segment ->
-            if (segment is OfficialForumRichTextSegment.Text) appendEmojiText(segment.value, this)
+            if (segment is OfficialForumRichTextSegment.Text) appendLinkedText(segment.value, this)
             else add(segment)
         }
     }
 
     /** Passive token flow, not a DOM/execution engine. Breaks are normalized once across inline atoms. */
-    private fun normalizedContent(html: String, rich: Boolean): List<OfficialForumRichTextSegment> {
+    private fun normalizedContent(html: String, rich: Boolean, entitiesDecoded: Boolean = false): List<OfficialForumRichTextSegment> {
         val result = mutableListOf<OfficialForumRichTextSegment>()
         val outputText = StringBuilder()
         val line = mutableListOf<OfficialForumRichTextSegment>()
@@ -111,7 +115,8 @@ internal object OfficialForumHtml {
         }
         fun appendHtml(value: String) {
             val source = sourceNewlineRegex.replace(value, if (hasHtml && preDepth == 0) " " else "\n")
-            appendDecoded(decodeEntities(tagRegex.replace(source, "")))
+            val text = tagRegex.replace(source, "")
+            appendDecoded(if (entitiesDecoded) text else decodeEntities(text))
         }
         fun boundary(minimum: Int) {
             flushLine()
@@ -121,18 +126,21 @@ internal object OfficialForumHtml {
         val tokens = if (rich) richFlowRegex else flowBreakRegex
         for (match in tokens.findAll(html)) {
             appendHtml(html.substring(cursor, match.range.first))
-            val token = match.value
+            val escaped = match.value.startsWith("&lt;", true)
+            val token = if (escaped) decodeEntities(match.value) else match.value
             val name = tagNameRegex.find(token)?.groupValues?.get(1)?.lowercase().orEmpty()
             when (name) {
                 "br" -> { val visibleLine = flushLine(); pendingBreaks = if (visibleLine) 1 else pendingBreaks + 1 }
                 "img" -> imageSegment(token)?.let { finishText(); line += it }
                 "a" -> {
                     val anchor = anchorRegex.matchEntire(token)
-                    val text = anchor?.groupValues?.get(2)?.let { body ->
-                        plainText(sourceNewlineRegex.replace(body, if (preDepth == 0) " " else "\n"))
-                    }.orEmpty()
-                    val url = anchor?.groupValues?.get(1)?.let(::decodeEntities)?.let(::remoteUrl)
-                    if (text.isNotEmpty() && url != null) { finishText(); line += OfficialForumRichTextSegment.Link(text, url) }
+                    val body = anchor?.groupValues?.get(2).orEmpty()
+                    val text = normalizedContent(sourceNewlineRegex.replace(body, if (preDepth == 0) " " else "\n"), false, entitiesDecoded = escaped)
+                        .filterIsInstance<OfficialForumRichTextSegment.Text>().joinToString("") { it.value }
+                    val href = anchor?.groupValues?.get(1)?.let { if (escaped) it else decodeEntities(it) }
+                    val url = href?.let { if (escaped) clickableUrl(it) else remoteUrl(it) }
+                    if (!nestedAnchorRegex.containsMatchIn(body) && text.isNotEmpty() && url != null) { finishText(); line += OfficialForumRichTextSegment.Link(text, url) }
+                    else if (escaped) appendDecoded(token) // Invalid escaped markup stays literal, never executed.
                     else appendDecoded(text)
                 }
                 "div", "li" -> boundary(1)
@@ -244,6 +252,37 @@ internal object OfficialForumHtml {
         dimensionRegex.pattern.format(name).toRegex(RegexOption.IGNORE_CASE).find(tag)?.groupValues?.getOrNull(1)?.toIntOrNull()?.let { if (it > 0) return it }
         val style = Regex("""\bstyle\s*=\s*[\"']([^\"']+)[\"']""", RegexOption.IGNORE_CASE).find(tag)?.groupValues?.getOrNull(1) ?: return null
         return styleDimensionRegex.pattern.format(name).toRegex(RegexOption.IGNORE_CASE).find(style)?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.takeIf { it > 0 }?.toInt()
+    }
+
+    /** Decode has already happened once. Never auto-link inside literal escaped markup. */
+    private fun appendLinkedText(text: String, result: MutableList<OfficialForumRichTextSegment>) {
+        fun appendBare(value: String) {
+            var cursor = 0
+            for (match in bareUrlRegex.findAll(value)) {
+                var candidate = match.value
+                while (candidate.isNotEmpty()) {
+                    val last = candidate.last()
+                    if (last in ".,;:!?\"'" || (last == ')' && candidate.count { it == ')' } > candidate.count { it == '(' })) candidate = candidate.dropLast(1)
+                    else break
+                }
+                val url = clickableUrl(candidate) ?: continue
+                appendEmojiText(value.substring(cursor, match.range.first), result)
+                result += OfficialForumRichTextSegment.Link(candidate, url)
+                cursor = match.range.first + candidate.length
+            }
+            appendEmojiText(value.substring(cursor), result)
+        }
+        var cursor = 0
+        for (match in literalAnchorRegex.findAll(text)) {
+            appendBare(text.substring(cursor, match.range.first))
+            appendEmojiText(match.value, result)
+            cursor = match.range.last + 1
+        }
+        appendBare(text.substring(cursor))
+    }
+
+    private fun clickableUrl(value: String): String? = remoteUrl(value)?.takeIf {
+        !runCatching { URI(it).host }.getOrNull().isNullOrBlank()
     }
 
     private fun appendEmojiText(text: String, result: MutableList<OfficialForumRichTextSegment>) {
