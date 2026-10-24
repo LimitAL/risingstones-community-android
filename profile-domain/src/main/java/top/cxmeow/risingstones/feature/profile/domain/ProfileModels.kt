@@ -88,3 +88,10 @@ sealed class ProfileException(message: String) : Exception(message) {
     data object Network : ProfileException("Profile transport failed")
     class Business(val code: Int) : ProfileException("Profile request failed")
 }
+
+/** Explicit official fc_id only. Missing/private IDs never imply that this user has no guild. */
+data class ProfileGuildReference(val id: String, val name: String?) {
+    init { require(id.isNotEmpty() && id.all { it in '0'..'9' } && id.any { it != '0' }) }
+}
+/** Additive read projection preserves CommunityProfile's published constructors and copy ABI. */
+data class ProfileGuildSnapshot(val profile: CommunityProfile, val guild: ProfileGuildReference?)

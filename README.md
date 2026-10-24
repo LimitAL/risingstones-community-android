@@ -150,3 +150,5 @@ AAB 和 SHA-256 清单附加到对应 GitHub Release。发布成功后可通过 
 
 提交代码前请阅读[贡献指南](CONTRIBUTING.md)和[架构边界](docs/architecture.md)。安全问题请按
 [安全说明](SECURITY.md)私下报告，不要在公开议题中提交凭证、个人响应或可复现的账号接管细节。
+
+本人资料的明确部队ID、部队可空事实及只读照片分页投影见 [本地合同](docs/guild-profile-read-local-20261024.md)。

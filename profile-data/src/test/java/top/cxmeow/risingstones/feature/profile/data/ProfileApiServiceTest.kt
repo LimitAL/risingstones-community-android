@@ -10,6 +10,30 @@ import top.cxmeow.risingstones.feature.profile.domain.*
 import top.cxmeow.risingstones.network.*
 
 class ProfileApiServiceTest {
+    @Test fun explicitGuildReferenceIsTakenFromTheSameVisibleResponseWithoutGuessing() = runTest {
+        val transport=Transport("{}");val service=ProfileApiService(client(transport),Provider())
+        for(id in listOf("2","999999999999999999999999999999")) {
+            transport.data="""{"uuid":"mock","character_name":"Mock","guild_publish":1,"characterDetail":[{"fc_id":"$id","guild_name":"Guild"}]}"""
+            val snapshot=service.fetchProfileWithGuild(ProfileOwner.User("mock"))
+            assertEquals(id,snapshot.guild?.id);assertEquals("Guild",snapshot.guild?.name)
+            assertEquals("mock",snapshot.profile.uuid)
+        }
+        assertEquals(2,transport.requests.size)
+        assertTrue(transport.requests.all{it.method==RisingStonesHttpMethod.Get})
+    }
+    @Test fun privateOrInvalidGuildCannotBecomeARouteAndSelfMayReadPrivateOwnedId() = runTest {
+        val transport=Transport("{}");val service=ProfileApiService(client(transport),Provider())
+        for(id in listOf("", "0","000","-1","2.0","２","abc","https://example.test/2")) {
+            transport.data="""{"uuid":"mock","guild_publish":1,"characterDetail":[{"fc_id":"$id","guild_name":"Named"}]}"""
+            assertNull(service.fetchProfileWithGuild(ProfileOwner.User("mock")).guild)
+        }
+        transport.data="""{"uuid":"mock","guild_publish":0,"characterDetail":[{"fc_id":"2","guild_name":"Hidden"}]}"""
+        val other=service.fetchProfileWithGuild(ProfileOwner.User("mock"));assertNull(other.guild);assertFalse(other.toString().contains("Hidden"))
+        assertEquals("2",service.fetchProfileWithGuild(ProfileOwner.Self).guild?.id)
+        transport.data="""{"uuid":"mock","guild_publish":1,"characterDetail":[{"guild_name":"Not an ID"}]}"""
+        assertNull(service.fetchProfileWithGuild(ProfileOwner.User("mock")).guild)
+    }
+
     @Test fun dynamicRowsRetainOnlyTheirOwnOptionalLikeFacts() = runTest {
         val transport=Transport("{}");val service=ProfileApiService(client(transport),Provider())
         for((fields,count,liked) in listOf(Triple("",null,null),Triple("\"like_count\":0,",0L,null),Triple("\"like_count\":\"7\",\"is_like\":1,",7L,true),Triple("\"like_count\":9,\"is_like\":\"0\",",9L,false),Triple("\"like_count\":2147483648,\"is_like\":2,",2147483648L,null),Triple("\"like_count\":-1,\"is_like\":null,",null,null),Triple("\"like_count\":\"bad\",\"is_like\":true,",null,null))) {

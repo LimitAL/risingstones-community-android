@@ -14,8 +14,21 @@ class ProfileApiService(
 ) : ProfileService {
     override val canRead: Boolean get() = RisingStonesCapability.AccountRead in sessionProvider.capabilities
 
-    override suspend fun fetchProfile(owner: ProfileOwner): CommunityProfile =
-        profile(get("userInfo/getUserInfo", owner.parameters()), owner == ProfileOwner.Self)
+    override suspend fun fetchProfile(owner: ProfileOwner): CommunityProfile = fetchProfileWithGuild(owner).profile
+
+    /** Same response supplies the visible name and explicit ID; never makes a second profile request. */
+    suspend fun fetchProfileWithGuild(owner: ProfileOwner): ProfileGuildSnapshot {
+        val row = get("userInfo/getUserInfo", owner.parameters())
+        val self = owner == ProfileOwner.Self
+        val value = profile(row, self)
+        val detail = (row["characterDetail"] as? JsonArray)?.firstOrNull() as? JsonObject
+        val id = detail?.text("fc_id")?.trim()?.takeIf {
+            it.isNotEmpty() && it.all { c -> c in '0'..'9' } && it.any { c -> c != '0' }
+        }
+        val reference = if ((self || row.number("guild_publish") == 1) && id != null)
+            ProfileGuildReference(id, detail.text("guild_name")?.takeIf(String::isNotBlank)) else null
+        return ProfileGuildSnapshot(value, reference)
+    }
 
     /** Two read endpoints; a failed recent-events endpoint does not discard a valid character snapshot. */
     suspend fun fetchSelfCharacterProfile(): ProfileCharacterData {

@@ -1,6 +1,8 @@
 package top.cxmeow.risingstones.feature.guild.data
 
 import java.net.URI
+import top.cxmeow.risingstones.feature.guild.domain.GuildReadSnapshot
+import top.cxmeow.risingstones.feature.guild.domain.GuildReadPhoto
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -118,11 +120,22 @@ class GuildApiService(
     )
 
     override suspend fun info(guildId: GuildId): GuildInfo {
-        val result = guildInfo(
-            get(guildPath("getGuildInfo"), listOf(q("guild_id", guildId.value))).requiredObject(),
-        )
+        val result = guildInfo(get(guildPath("getGuildInfo"), listOf(q("guild_id", guildId.value))).requiredObject())
         if (result.id != guildId) throw GuildException.InvalidResponse
         return result
+    }
+
+    suspend fun readInfo(guildId: GuildId): GuildReadSnapshot {
+        val row = get(guildPath("getGuildInfo"), listOf(q("guild_id", guildId.value))).requiredObject()
+        val parsed = guildInfo(row)
+        val house = row.optionalText("house_info")?.trim()
+        val masked = house?.takeIf(String::isNotEmpty)?.all { it == '*' } == true
+        val result = if(masked) parsed.copy(housing = GuildHousing(GuildHousingVisibility.Private, null, null)) else parsed
+        if (result.id != guildId) throw GuildException.InvalidResponse
+        return GuildReadSnapshot(result, row.optionalNonNegativeInt("member_num"),
+            row.optionalNonNegativeInt("active_member_num"), row.optionalFlag("isGuildMember", false),
+            row.optionalText("guild_board")?.takeIf(String::isNotBlank),
+            row.optionalText("part_date")?.takeIf(String::isNotBlank), guildReadEmblem(row.optionalText("grand_parentid")))
     }
 
     override suspend fun members(guildId: GuildId): GuildMembers {
@@ -154,19 +167,19 @@ class GuildApiService(
     }
 
     override suspend fun photos(guildId: GuildId, page: Int): GuildPage<GuildPhotoSummary> {
+        val result = readPhotos(guildId, page)
+        return GuildPage(result.items.map { it.photo }, result.page, result.hasMore, result.totalCount)
+    }
+
+    suspend fun readPhotos(guildId: GuildId, page: Int = 1): GuildPage<GuildReadPhoto> {
         require(page > 0)
-        val data = get(
-            guildPath("getGuildPhotos"),
-            listOf(q("guild_id", guildId.value), q("page", page), q("limit", PhotoPageSize)),
-        ).requiredObject()
+        val data = get(guildPath("getGuildPhotos"),
+            listOf(q("guild_id", guildId.value), q("page", page), q("limit", PhotoPageSize))).requiredObject()
         val rows = data.requiredArray("rows")
-        return GuildPage(
-            items = rows.map { photoSummary(it.requiredObject()) },
-            page = page,
-            // The official album continues after every non-empty page, including a short page.
-            hasMore = rows.isNotEmpty(),
-            totalCount = data.optionalNonNegativeInt("count"),
-        )
+        return GuildPage(rows.map { element ->
+            val row = element.requiredObject()
+            GuildReadPhoto(photoSummary(row), row.optionalText("uuid")?.trim()?.takeIf { it.isNotEmpty() && it != "-" && !it.all { c -> c == '*' } })
+        }, page, rows.isNotEmpty(), data.optionalNonNegativeInt("count"))
     }
 
     override suspend fun photo(id: Int): GuildPhotoDetail {
@@ -534,3 +547,10 @@ private val OfficialImageHosts = setOf(
     "ff14-eo.web.sdo.com",
     "static.web.sdo.com",
 )
+
+/** Same three official static assets as the product reference; unknown IDs do not guess a badge. */
+private fun guildReadEmblem(value: String?): String? {
+    val id=value?.toBigDecimalOrNull()?.stripTrailingZeros()?.toPlainString()
+    val filename=when(id){"1"->"theMaelstrom.png";"2"->"theOrderOfTheTwinAdder.png";"3"->"theImmortalFlames.png";else->return null}
+    return "https://static.web.sdo.com/jijiamobile/pic/ff14/ffstones/statistics/pvp/$filename"
+}

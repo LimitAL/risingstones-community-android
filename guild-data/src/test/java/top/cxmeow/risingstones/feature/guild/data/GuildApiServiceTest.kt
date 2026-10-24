@@ -30,6 +30,27 @@ import top.cxmeow.risingstones.network.RisingStonesSessionValidation
 import top.cxmeow.risingstones.network.RisingStonesSessionValidator
 
 class GuildApiServiceTest {
+    @Test fun additiveInfoReadRetainsMissingCountsMembershipBoardAndActualSourceDate() = runTest {
+        val transport=GuildTransport().apply{body=envelope("""{"guild_id":"123","guild_name":"Mock","guild_board":"Read only","grand_parentid":"3.0","part_date":"2026-10-11","house_public":false,"house_info":"Secret"}""")}
+        val result=service(transport).readInfo(GuildId("123"))
+        assertNull(result.memberCount);assertNull(result.activeMemberCount);assertFalse(result.isMember)
+        assertEquals("Read only",result.board);assertEquals("2026-10-11",result.sourceDate);assertTrue(result.emblemUrl!!.endsWith("theImmortalFlames.png"))
+        assertNull(result.info.housing.description)
+        transport.body=envelope("""{"guild_id":"123","isGuildMember":1,"house_public":false,"house_info":"******"}""")
+        val masked=service(transport).readInfo(GuildId("123"));assertEquals(GuildHousingVisibility.Private,masked.info.housing.visibility);assertNull(masked.info.housing.description)
+        transport.body=envelope("""{"guild_id":"123","member_num":0,"active_member_num":0,"isGuildMember":1}""")
+        val zero=service(transport).readInfo(GuildId("123"));assertEquals(0,zero.memberCount);assertTrue(zero.isMember)
+    }
+    @Test fun additivePhotosKeepUploaderAndShortPageContinuesUntilAnEmptyResponse() = runTest {
+        val transport=GuildTransport().apply{body=envelope("""{"count":2,"rows":[{"id":7,"photo_url":"https://ff14risingstones.gcloud.com.cn/mock.jpg","character_name":"Mock","uuid":"mock-author","like_count":2}]}""")}
+        val first=service(transport).readPhotos(GuildId("123"),1)
+        assertEquals("mock-author",first.items.single().authorUuid);assertTrue(first.hasMore);assertEquals(2,first.totalCount)
+        transport.body=envelope("""{"rows":[]}""")
+        assertFalse(service(transport).readPhotos(GuildId("123"),2).hasMore)
+        assertEquals("2",transport.requests.last().url.toHttpUrl().queryParameter("page"))
+        assertTrue(transport.requests.all{it.method==top.cxmeow.risingstones.network.RisingStonesHttpMethod.Get})
+    }
+
     @Test
     fun ownGuildKeepsLargeDecimalIdAndZeroMeansNoGuild() = runTest {
         val transport = GuildTransport().apply { body = envelope("""{"gc_id":"0"}""") }
