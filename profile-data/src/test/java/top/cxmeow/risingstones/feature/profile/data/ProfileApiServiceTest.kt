@@ -10,6 +10,49 @@ import top.cxmeow.risingstones.feature.profile.domain.*
 import top.cxmeow.risingstones.network.*
 
 class ProfileApiServiceTest {
+    @Test fun badgeIntegerFormsMatchFoundationWithoutRoundingOrChangingQuotedText()=runTest {
+        val transport=Transport("{}");val api=service(transport)
+        for((wire,expected)in listOf("1.0" to 1L,"1e0" to 1L,"1.5" to null,"\"1.0\"" to null,"true" to 1L,"9223372036854775807" to Long.MAX_VALUE,"9223372036854775808" to null)){
+            val raw="""[{"badgeField":"future","badgeName":"Future","badgeLevel":$wire,"badgeWeight":0.0}]"""
+            transport.data="""{"uuid":"mock","character_name":"Mock","badge":${kotlinx.serialization.json.JsonPrimitive(raw)}}"""
+            val rows=api.fetchReadSnapshot(ProfileOwner.User("mock")).badges!!
+            if(expected==null)assertTrue(rows.isEmpty())else{assertEquals(expected,rows.single().level);assertEquals(0L,rows.single().weight)}
+        }
+    }
+
+    @Test fun badgesUseOneExistingResponseAndDistinguishUnknownFromNoDisplayedItems() = runTest {
+        val transport=Transport("{}");val api=service(transport)
+        for(raw in listOf("null","{}","[]","\"bad\"", "\"[null]\"")){
+            transport.data="""{"uuid":"mock","character_name":"Mock","badge":$raw}"""
+            assertNull(api.fetchReadSnapshot(ProfileOwner.User("mock")).badges)
+        }
+        transport.data="""{"uuid":"mock","character_name":"Mock","badge":"[]"}"""
+        assertEquals(emptyList<ProfileBadge>(),api.fetchReadSnapshot(ProfileOwner.User("mock")).badges)
+        assertTrue(transport.requests.all{it.method==RisingStonesHttpMethod.Get})
+    }
+    @Test fun badgeFiltersAndStableWeightsUseCatalogOrderWithoutInventingUnknownDescription() = runTest {
+        val payload="""[{"badgeField":"future_b","badgeName":"Future B","badgeLevel":1,"badgeWeight":2},{"badgeField":"warrior_badge","badgeName":"Raw warrior","badgeLevel":"3","badgeWeight":2},{"badgeField":"collapse_badge","badgeName":"Raw collapse","badgeLevel":1,"badgeWeight":2},{"badgeField":"future_a","badgeName":"Future A","badgeLevel":1,"badgeWeight":2},{"badgeField":"hidden","badgeName":"Hidden","badgeLevel":2,"badgeWeight":-1},{"badgeField":"zero","badgeName":"Zero","badgeLevel":0},{"badgeField":"default","badgeName":"Default","badgeLevel":1,"badgeWeight":0},{"badgeField":"late","badgeName":"Late","badgeLevel":1,"badgeWeight":1000},{"badgeField":"early","badgeName":"Early","badgeLevel":1,"badgeWeight":-2}]"""
+        val transport=Transport("""{"uuid":"mock","character_name":"Mock","badge":${kotlinx.serialization.json.JsonPrimitive(payload)}}""")
+        val rows=service(transport).fetchReadSnapshot(ProfileOwner.User("mock")).badges!!
+        assertEquals(listOf("early","collapse_badge","warrior_badge","future_b","future_a","default","late"),rows.map{it.field})
+        assertEquals("荣誉光之战士（金）",ProfileBadgeCatalog.presentation(rows[2]).name)
+        assertNull(ProfileBadgeCatalog.presentation(rows[3]).description);assertEquals("Future B",ProfileBadgeCatalog.presentation(rows[3]).name)
+        assertEquals(0L,rows[5].weight);assertEquals(1,transport.requests.size)
+    }
+    @Test fun adminNonzeroOnlyShowsAdminWithoutChangingSelfOrAuthorization() = runTest {
+        val transport=Transport("{}");val api=service(transport)
+        for(marker in listOf("1","\"2\"","-1","true")){
+            transport.data="""{"uuid":"mock","character_name":"Mock","relation":0,"admin_tag":$marker,"badge":"bad"}"""
+            val value=api.fetchReadSnapshot(ProfileOwner.User("mock"));assertFalse(value.profile.isSelf);assertEquals("admin_tag",value.badges!!.single().field)
+        }
+        transport.data="""{"uuid":"mock","character_name":"Mock","admin_tag":0}""";assertNull(api.fetchReadSnapshot(ProfileOwner.User("mock")).badges)
+    }
+    @Test fun invalidBadgeRowsAreSkippedWithoutZeroLevelOrExtraQueries() = runTest {
+        val payload="""[{"badgeField":"ok","badgeName":"Known raw","badgeLevel":true,"badgeWeight":"bad"},{"badgeField":"bad","badgeName":"Bad","badgeLevel":-1},{"badgeField":"bad2","badgeName":"Bad","badgeLevel":1.5},{"badgeField":"bad3","badgeName":"Bad","badgeLevel":9223372036854775808},{"badgeField":"bad4","badgeName":"***","badgeLevel":1}]"""
+        val transport=Transport("""{"uuid":"mock","character_name":"Mock","badge":${kotlinx.serialization.json.JsonPrimitive(payload)}}""")
+        val row=service(transport).fetchReadSnapshot(ProfileOwner.User("mock")).badges!!.single();assertEquals("ok",row.field);assertEquals(1L,row.level);assertNull(row.weight)
+    }
+
     @Test fun rawCountsDistinguishUnknownZeroAndLongValuesWithoutBorrowingTotals() = runTest {
         val transport=Transport("{}");val api=service(transport)
         for((wire,expected) in listOf("null" to null,"0" to 0L,"\"0\"" to 0L,"7" to 7L,"2147483648" to 2147483648L,"-1" to null,"1.5" to null,"true" to null,"{}" to null,"[]" to null,"\"bad\"" to null,"9223372036854775808" to null)) {

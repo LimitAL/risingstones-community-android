@@ -35,7 +35,7 @@ class ProfileApiService(
             ProfileGuildReference(id, meaningfulProfileText(detail.text("guild_name"))) else null
         val follow = row["followFansiNum"] as? JsonObject
         return ProfileReadSnapshot(value, reference, ProfileReadCounts(
-            sourceCount(follow?.get("followNum")), sourceCount(follow?.get("fansNum")), sourceCount(row["beLikedNum"])))
+            sourceCount(follow?.get("followNum")), sourceCount(follow?.get("fansNum")), sourceCount(row["beLikedNum"])),profileBadges(row,json))
     }
 
     /** Two read endpoints; a failed recent-events endpoint does not discard a valid character snapshot. */
@@ -280,4 +280,33 @@ private fun sourceCount(value: JsonElement?): Long? {
     val scalar = value as? JsonPrimitive ?: return null
     if (!scalar.isString && scalar.booleanOrNull != null) return null
     return scalar.contentOrNull?.trim()?.toLongOrNull()?.takeIf { it >= 0 }
+}
+
+private fun profileBadges(row:JsonObject,json:Json):List<ProfileBadge>? {
+    val admin=badgeInteger(row["admin_tag"])
+    if(admin!=null && admin!=0L){
+        val value=ProfileBadge("admin_tag","admin_tag",admin)
+        return listOf(value.copy(name=ProfileBadgeCatalog.presentation(value).name))
+    }
+    val raw=selfCharacterFactText(row["badge"]) ?: return null
+    val rows=runCatching{json.parseToJsonElement(raw) as? JsonArray}.getOrNull() ?: return null
+    if(rows.any{it !is JsonObject})return null
+    return rows.mapNotNull { element ->
+        val item=element as JsonObject
+        val field=selfCharacterFactText(item["badgeField"]) ?: return@mapNotNull null
+        val name=selfCharacterFactText(item["badgeName"]) ?: return@mapNotNull null
+        val level=badgeInteger(item["badgeLevel"])?.takeIf{it>0} ?: return@mapNotNull null
+        val weight=badgeInteger(item["badgeWeight"])
+        if(weight==-1L)null else ProfileBadge(field,name,level,weight)
+    }.withIndex().sortedWith(compareBy<IndexedValue<ProfileBadge>>{it.value.weight?.takeUnless{w->w==0L} ?: 999L}
+        .thenBy{ProfileBadgeCatalog.order(it.value.field)}.thenBy{it.index}).map{it.value}
+}
+
+/** Foundation accepts integral JSON numbers (1.0/1e0); quoted "1.0" stays invalid. Never round. */
+private fun badgeInteger(value:JsonElement?):Long? {
+    val scalar=value as? JsonPrimitive ?: return null
+    val raw=scalar.contentOrNull?.trim() ?: return null
+    if(scalar.isString)return raw.toLongOrNull()
+    scalar.booleanOrNull?.let{return if(it)1L else 0L}
+    return try{raw.toBigDecimalOrNull()?.longValueExact()}catch(_:ArithmeticException){null}
 }
