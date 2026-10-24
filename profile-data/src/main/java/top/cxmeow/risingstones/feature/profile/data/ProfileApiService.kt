@@ -61,8 +61,19 @@ class ProfileApiService(
                 ?.sortedWith(compareByDescending<ProfileCharacterEvent> { it.occurredAt }.thenBy { it.detail })
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { null }
+        // iOS accepts the official single-item array and the equivalent object shape.
+        val detail = when (val value = row["characterDetail"]) {
+            is JsonArray -> value.firstOrNull() as? JsonObject
+            is JsonObject -> value
+            else -> null
+        }
+        val facts = detail?.let { values -> listOf(
+            ProfileFactKind.CreatedAt to "create_time", ProfileFactKind.LastLogin to "last_login_time",
+            ProfileFactKind.PlayTime to "play_time", ProfileFactKind.Housing to "house_info",
+            ProfileFactKind.CrystalRank to "crystal_rank", ProfileFactKind.IslandSanctuaryRank to "newrank",
+        ).map { (kind, field) -> ProfileCharacterFact(kind, selfCharacterFactText(values[field]), row.text("${field}_publish")?.trim()?.lowercase() in setOf("0", "false")) } }
         return ProfileCharacterData(id, name, row.text("area_name").orEmpty(), row.text("group_name").orEmpty(),
-            jobs, row.number("career_publish") == 0, events, row.number("resently_publish") == 0, java.time.Instant.now())
+            jobs, row.number("career_publish") == 0, events, row.number("resently_publish") == 0, java.time.Instant.now(), facts)
     }
 
     override suspend fun readSection(query: ProfileListQuery): ProfilePage {
@@ -245,4 +256,11 @@ private fun profileEventDate(value: String?): java.time.Instant? {
 /** Official empty/dash/star placeholders are unavailable facts, including in a confirmed self response. */
 private fun meaningfulProfileText(value: String?): String? = value?.trim()?.takeIf {
     it.isNotEmpty() && it != "-" && !it.all { c -> c == '*' }
+}
+
+/** iOS flexible scalar contract: JSON booleans map to 0/1, quoted text stays verbatim. */
+private fun selfCharacterFactText(value: JsonElement?): String? {
+    val scalar = value as? JsonPrimitive ?: return null
+    val raw = if (!scalar.isString && scalar.booleanOrNull != null) if (scalar.booleanOrNull == true) "1" else "0" else scalar.contentOrNull
+    return meaningfulProfileText(raw)
 }

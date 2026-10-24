@@ -61,4 +61,38 @@ class ProfileCharacterReadTest {
         val f=Fixture();f.events="""[{"detail":"B","log_time":"2026-10-24 00:15:00"},{"detail":"A","log_time":"2026-10-24 00:15:00"},{"detail":"A","log_time":"2026-10-24 00:15:00"},{"detail":"Older","log_time":"2026-10-23 00:15:00"}]"""
         assertEquals(listOf("A","B","Older"),f.service.fetchSelfCharacterProfile().events!!.map{it.detail})
     }
+    @Test fun sixSelfFactsRetainZeroPrivateMarkersAndExactOfficialText()=runTest {
+        val f=Fixture();f.info="""{"uuid":"mock","character_name":"Mock","create_time_publish":0,"newrank_publish":0,"characterDetail":[{"create_time":"2020-01-02","last_login_time":"2026-10-24 00:10:00","play_time":"0小时0分钟","house_info":"无房产","crystal_rank":"青铜3阶","newrank":0}]}"""
+        val p=f.service.fetchSelfCharacterProfile();val facts=p.facts!!
+        assertEquals(6,facts.size);assertEquals("0",facts.single{it.kind==ProfileFactKind.IslandSanctuaryRank}.value)
+        assertEquals("0小时0分钟",facts.single{it.kind==ProfileFactKind.PlayTime}.value)
+        assertTrue(facts.single{it.kind==ProfileFactKind.CreatedAt}.unpublished)
+        assertTrue(facts.single{it.kind==ProfileFactKind.IslandSanctuaryRank}.unpublished)
+        assertTrue(f.requests.all{it.method==RisingStonesHttpMethod.Get&&!it.url.contains("uuid=")})
+    }
+    @Test fun objectDetailsAndUnavailablePlaceholdersDoNotBecomeZero()=runTest {
+        val f=Fixture();f.info="""{"uuid":"mock","character_name":"Mock","characterDetail":{"create_time":"-","last_login_time":"***","house_info":"  ","newrank":"0"}}"""
+        val facts=f.service.fetchSelfCharacterProfile().facts!!
+        assertEquals(5,facts.count{it.value==null});assertEquals("0",facts.single{it.kind==ProfileFactKind.IslandSanctuaryRank}.value)
+        for(detail in listOf("null","[]","[null]","42")){
+            f.info="""{"uuid":"mock","character_name":"Mock","characterDetail":$detail}""";assertNull(f.service.fetchSelfCharacterProfile().facts)
+        }
+    }
+    @Test fun recentFailureDoesNotDiscardFactsAndNoExtraEndpointIsRequested()=runTest {
+        val f=Fixture();f.eventsCode=500;f.info="""{"uuid":"mock","character_name":"Mock","characterDetail":{"play_time":"未知原文","house_info":"官方原文"}}"""
+        val p=f.service.fetchSelfCharacterProfile();assertNull(p.events);assertEquals("未知原文",p.facts!!.single{it.kind==ProfileFactKind.PlayTime}.value);assertEquals(2,f.requests.size)
+    }
+    @Test fun flexiblePrivateSwitchesAndBooleanZeroFollowExistingIosContract()=runTest {
+        val f=Fixture();f.info="""{"uuid":"mock","character_name":"Mock","newrank_publish":false,"house_info_publish":" FALSE ","create_time_publish":" 0 ","characterDetail":{"newrank":false,"house_info":"Private house","create_time":"2020-01-02"}}"""
+        val facts=f.service.fetchSelfCharacterProfile().facts!!
+        assertEquals("0",facts.single{it.kind==ProfileFactKind.IslandSanctuaryRank}.value)
+        assertTrue(facts.filter{it.kind in setOf(ProfileFactKind.IslandSanctuaryRank,ProfileFactKind.Housing,ProfileFactKind.CreatedAt)}.all{it.unpublished})
+    }
+    @Test fun legacyCopyDefaultAndConstructorKeepFactsCompatibleLocally(){
+        val p=ProfileCharacterData("id","Mock","Area","World",null,false,null,false,Instant.EPOCH,listOf(ProfileCharacterFact(ProfileFactKind.Housing,"house",false)))
+        val result=ProfileCharacterData.`copy$default`(p,null,null,null,null,null,false,null,false,null,511,null)
+        assertEquals(p,result)
+        assertEquals(p.facts,p.copy("id","Mock","Area","World",null,false,null,false,Instant.EPOCH).facts)
+        assertNotNull(ProfileCharacterData::class.java.constructors.singleOrNull{it.parameterCount==9})
+    }
 }
