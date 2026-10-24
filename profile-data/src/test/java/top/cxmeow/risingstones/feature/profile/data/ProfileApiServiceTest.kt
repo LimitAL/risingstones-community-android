@@ -10,6 +10,40 @@ import top.cxmeow.risingstones.feature.profile.domain.*
 import top.cxmeow.risingstones.network.*
 
 class ProfileApiServiceTest {
+    @Test fun sameResponseSelfRelationOpensOnlyTheExplicitPrivateGuildWithoutAnotherQuery() = runTest {
+        val transport=Transport("{}");val api=service(transport)
+        for(marker in listOf("-1","\"-1\"","\" -1 \"")){
+            transport.data="""{"uuid":"mock-self","character_name":"Mock self","relation":$marker,"guild_publish":0,"characterDetail":[{"fc_id":"999999999999999999999999","guild_name":"Private company"}]}"""
+            val value=api.fetchProfileWithGuild(ProfileOwner.User("mock-self"))
+            assertTrue(value.profile.isSelf);assertEquals("999999999999999999999999",value.guild?.id)
+            assertEquals("Private company",value.profile.facts.single{it.kind==ProfileFactKind.Guild}.value)
+        }
+        assertEquals(3,transport.requests.size)
+        assertTrue(transport.requests.all{it.method==RisingStonesHttpMethod.Get&&it.url.toHttpUrl().queryParameter("uuid")=="mock-self"})
+    }
+    @Test fun unknownOtherMalformedOrMismatchedSelfRelationsNeverExposePrivateFacts() = runTest {
+        val transport=Transport("{}");val api=service(transport)
+        for(marker in listOf("null","0","1","3","-2","\"bad\"","-1.0","true","[]")){
+            transport.data="""{"uuid":"mock-self","character_name":"Mock","relation":$marker,"guild_publish":0,"characterDetail":[{"fc_id":"2","guild_name":"Hidden company"}]}"""
+            val value=api.fetchProfileWithGuild(ProfileOwner.User("mock-self"));assertFalse(value.profile.isSelf);assertNull(value.guild);assertFalse(value.toString().contains("Hidden company"))
+        }
+        transport.data="""{"uuid":"mock-self","relation":-1,"guild_publish":0,"characterDetail":[{"fc_id":"2","guild_name":"Hidden company"}]}"""
+        val mismatch=api.fetchProfileWithGuild(ProfileOwner.User("another-requested-user"))
+        assertFalse(mismatch.profile.isSelf);assertNull(mismatch.guild);assertFalse(mismatch.toString().contains("Hidden company"))
+    }
+    @Test fun selfMarkerDoesNotInventMissingIdsOrUnmaskStarAndDashFacts() = runTest {
+        val transport=Transport("{}");val api=service(transport)
+        for(id in listOf("","0","-1","2.0","２")){
+            transport.data="""{"uuid":"mock-self","relation":-1,"guild_publish":0,"characterDetail":[{"fc_id":"$id","guild_name":"Private company"}]}"""
+            val value=api.fetchProfileWithGuild(ProfileOwner.User("mock-self"));assertTrue(value.profile.isSelf);assertNull(value.guild)
+        }
+        for(placeholder in listOf(" ****** ","-","")){
+            transport.data="""{"uuid":"mock-self","relation":-1,"guild_publish":0,"characterDetail":[{"fc_id":"2","guild_name":"$placeholder"}]}"""
+            val value=api.fetchProfileWithGuild(ProfileOwner.User("mock-self"));assertTrue(value.profile.isSelf)
+            assertNull(value.guild?.name);val fact=value.profile.facts.single{it.kind==ProfileFactKind.Guild};assertNull(fact.value);assertEquals(ProfileVisibility.Unavailable,fact.visibility)
+        }
+    }
+
     @Test fun explicitGuildReferenceIsTakenFromTheSameVisibleResponseWithoutGuessing() = runTest {
         val transport=Transport("{}");val service=ProfileApiService(client(transport),Provider())
         for(id in listOf("2","999999999999999999999999999999")) {

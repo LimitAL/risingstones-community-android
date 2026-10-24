@@ -19,14 +19,16 @@ class ProfileApiService(
     /** Same response supplies the visible name and explicit ID; never makes a second profile request. */
     suspend fun fetchProfileWithGuild(owner: ProfileOwner): ProfileGuildSnapshot {
         val row = get("userInfo/getUserInfo", owner.parameters())
-        val self = owner == ProfileOwner.Self
+        // Official relation -1 identifies self only for the UUID requested in this response.
+        val self = owner == ProfileOwner.Self || (row.text("relation")?.trim()?.toIntOrNull() == -1 &&
+            (owner as? ProfileOwner.User)?.let { it.uuid == row.text("uuid") } == true)
         val value = profile(row, self)
         val detail = (row["characterDetail"] as? JsonArray)?.firstOrNull() as? JsonObject
         val id = detail?.text("fc_id")?.trim()?.takeIf {
             it.isNotEmpty() && it.all { c -> c in '0'..'9' } && it.any { c -> c != '0' }
         }
         val reference = if ((self || row.number("guild_publish") == 1) && id != null)
-            ProfileGuildReference(id, detail.text("guild_name")?.takeIf(String::isNotBlank)) else null
+            ProfileGuildReference(id, meaningfulProfileText(detail.text("guild_name"))) else null
         return ProfileGuildSnapshot(value, reference)
     }
 
@@ -155,7 +157,7 @@ private fun profile(row: JsonObject, self: Boolean): CommunityProfile {
     val facts = fields.map { (kind, field) ->
         val flag = if (kind == ProfileFactKind.Guild) "guild_publish" else "${field}_publish"
         // Never expose a hidden value through a supposedly presentation-only visibility flag.
-        val value = if (visible(flag)) detail?.text(field)?.takeIf(String::isNotBlank) else null
+        val value = if (visible(flag)) meaningfulProfileText(detail?.text(field)) else null
         ProfileFact(kind, if (!visible(flag)) ProfileVisibility.Private else if (value == null)
             ProfileVisibility.Unavailable else ProfileVisibility.Visible, value)
     }
@@ -238,4 +240,9 @@ private fun profileEventDate(value: String?): java.time.Instant? {
     )
     for (parse in parsers) try { return parse() } catch (_: java.time.format.DateTimeParseException) { }
     return null
+}
+
+/** Official empty/dash/star placeholders are unavailable facts, including in a confirmed self response. */
+private fun meaningfulProfileText(value: String?): String? = value?.trim()?.takeIf {
+    it.isNotEmpty() && it != "-" && !it.all { c -> c == '*' }
 }
