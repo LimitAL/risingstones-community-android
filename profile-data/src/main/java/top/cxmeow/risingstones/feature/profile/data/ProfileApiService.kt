@@ -17,19 +17,25 @@ class ProfileApiService(
     override suspend fun fetchProfile(owner: ProfileOwner): CommunityProfile = fetchProfileWithGuild(owner).profile
 
     /** Same response supplies the visible name and explicit ID; never makes a second profile request. */
-    suspend fun fetchProfileWithGuild(owner: ProfileOwner): ProfileGuildSnapshot {
+    suspend fun fetchProfileWithGuild(owner: ProfileOwner): ProfileGuildSnapshot =
+        fetchReadSnapshot(owner).let { ProfileGuildSnapshot(it.profile, it.guild) }
+
+    /** One GET retains optional source counts without altering legacy zero-default consumers. */
+    suspend fun fetchReadSnapshot(owner: ProfileOwner): ProfileReadSnapshot {
         val row = get("userInfo/getUserInfo", owner.parameters())
         // Official relation -1 identifies self only for the UUID requested in this response.
         val self = owner == ProfileOwner.Self || (row.text("relation")?.trim()?.toIntOrNull() == -1 &&
             (owner as? ProfileOwner.User)?.let { it.uuid == row.text("uuid") } == true)
         val value = profile(row, self)
-        val detail = (row["characterDetail"] as? JsonArray)?.firstOrNull() as? JsonObject
+        val detail = profileDetail(row)
         val id = detail?.text("fc_id")?.trim()?.takeIf {
             it.isNotEmpty() && it.all { c -> c in '0'..'9' } && it.any { c -> c != '0' }
         }
         val reference = if ((self || row.number("guild_publish") == 1) && id != null)
             ProfileGuildReference(id, meaningfulProfileText(detail.text("guild_name"))) else null
-        return ProfileGuildSnapshot(value, reference)
+        val follow = row["followFansiNum"] as? JsonObject
+        return ProfileReadSnapshot(value, reference, ProfileReadCounts(
+            sourceCount(follow?.get("followNum")), sourceCount(follow?.get("fansNum")), sourceCount(row["beLikedNum"])))
     }
 
     /** Two read endpoints; a failed recent-events endpoint does not discard a valid character snapshot. */
@@ -155,7 +161,7 @@ class ProfileApiService(
 
 private fun profile(row: JsonObject, self: Boolean): CommunityProfile {
     val id = row.text("uuid")?.takeIf(String::isNotBlank) ?: throw ProfileException.InvalidResponse
-    val detail = (row["characterDetail"] as? JsonArray)?.firstOrNull() as? JsonObject
+    val detail = profileDetail(row)
     fun visible(flag: String) = self || row.number(flag) == 1
     val fields = listOf(
         ProfileFactKind.Guild to "guild_name", ProfileFactKind.CreatedAt to "create_time",
@@ -263,4 +269,15 @@ private fun selfCharacterFactText(value: JsonElement?): String? {
     val scalar = value as? JsonPrimitive ?: return null
     val raw = if (!scalar.isString && scalar.booleanOrNull != null) if (scalar.booleanOrNull == true) "1" else "0" else scalar.contentOrNull
     return meaningfulProfileText(raw)
+}
+
+private fun profileDetail(row: JsonObject): JsonObject? = when(val value = row["characterDetail"]) {
+    is JsonObject -> value
+    is JsonArray -> value.firstOrNull() as? JsonObject
+    else -> null
+}
+private fun sourceCount(value: JsonElement?): Long? {
+    val scalar = value as? JsonPrimitive ?: return null
+    if (!scalar.isString && scalar.booleanOrNull != null) return null
+    return scalar.contentOrNull?.trim()?.toLongOrNull()?.takeIf { it >= 0 }
 }

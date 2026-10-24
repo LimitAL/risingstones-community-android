@@ -10,6 +10,36 @@ import top.cxmeow.risingstones.feature.profile.domain.*
 import top.cxmeow.risingstones.network.*
 
 class ProfileApiServiceTest {
+    @Test fun rawCountsDistinguishUnknownZeroAndLongValuesWithoutBorrowingTotals() = runTest {
+        val transport=Transport("{}");val api=service(transport)
+        for((wire,expected) in listOf("null" to null,"0" to 0L,"\"0\"" to 0L,"7" to 7L,"2147483648" to 2147483648L,"-1" to null,"1.5" to null,"true" to null,"{}" to null,"[]" to null,"\"bad\"" to null,"9223372036854775808" to null)) {
+            transport.data="""{"uuid":"mock","character_name":"Mock","followFansiNum":{"followNum":$wire,"fansNum":9},"beLikedNum":$wire,"count":777}"""
+            val snap=api.fetchReadSnapshot(ProfileOwner.User("mock"));assertEquals(expected,snap.counts.following);assertEquals(expected,snap.counts.liked);assertEquals(9L,snap.counts.followers)
+        }
+        assertTrue(transport.requests.all{it.method==RisingStonesHttpMethod.Get})
+    }
+    @Test fun equivalentDetailShapesRespectOtherPrivacyAndNeverPromoteMismatchedSelf() = runTest {
+        val transport=Transport("{}");val api=service(transport)
+        for(detail in listOf("""{"house_info":"Hidden","fc_id":"42","guild_name":"Guild"}""","""[{"house_info":"Hidden","fc_id":"42","guild_name":"Guild"}]""")) {
+            transport.data="""{"uuid":"mock","character_name":"Mock","relation":-1,"guild_publish":0,"house_info_publish":0,"characterDetail":$detail}"""
+            val other=api.fetchReadSnapshot(ProfileOwner.User("different"));assertFalse(other.profile.isSelf);assertNull(other.guild);assertFalse(other.toString().contains("Hidden"))
+            val self=api.fetchReadSnapshot(ProfileOwner.User("mock"));assertEquals("Hidden",self.profile.facts.single{it.kind==ProfileFactKind.Housing}.value);assertEquals("42",self.guild?.id)
+        }
+    }
+
+    @Test fun missingCountCannotEstablishZero() = runTest {
+        val transport=Transport("""{"uuid":"mock","character_name":"Mock"}""")
+        assertNull(service(transport).fetchReadSnapshot(ProfileOwner.User("mock")).counts.following)
+    }
+
+    @Test fun objectDetailRetainsVisibleFactsAndExplicitGuild() = runTest {
+        val transport=Transport("""{"uuid":"mock","character_name":"Mock","guild_publish":1,"house_info_publish":1,"characterDetail":{"fc_id":"42","guild_name":"Guild","house_info":"House"}}""")
+        val snapshot=service(transport).fetchProfileWithGuild(ProfileOwner.User("mock"))
+        assertEquals("House",snapshot.profile.facts.single{it.kind==ProfileFactKind.Housing}.value)
+        assertEquals("42",snapshot.guild?.id)
+        assertEquals(1,transport.requests.size)
+    }
+
     @Test fun sameResponseSelfRelationOpensOnlyTheExplicitPrivateGuildWithoutAnotherQuery() = runTest {
         val transport=Transport("{}");val api=service(transport)
         for(marker in listOf("-1","\"-1\"","\" -1 \"")){
