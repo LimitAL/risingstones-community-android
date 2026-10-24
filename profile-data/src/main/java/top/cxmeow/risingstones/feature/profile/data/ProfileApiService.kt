@@ -154,7 +154,14 @@ private fun content(row: JsonObject, section: ProfileSection): ProfileListItem.C
     return ProfileListItem.Content(ProfileContentTarget(kind, id), row.text("title").orEmpty(),
         row.text(if (kind == ProfileContentKind.Dynamic) "mask_content" else "content_pre").orEmpty(),
         images(row.text(if (kind == ProfileContentKind.Dynamic) "pic_url" else "cover_pic")),
-        row.text(if (favorite) "posts_created_at" else "created_at"))
+        row.text(if (favorite) "posts_created_at" else "created_at"),
+        if (kind == ProfileContentKind.Dynamic) sourceLikeFacts(row) else null)
+}
+
+private fun sourceLikeFacts(row: JsonObject): ProfileDynamicLikeFacts? {
+    val count = row.text("like_count")?.toLongOrNull()?.takeIf { it >= 0 }
+    val liked = when (row.text("is_like")) { "0" -> false; "1" -> true; else -> null }
+    return if (count == null && liked == null) null else ProfileDynamicLikeFacts(liked, count)
 }
 
 private const val PageSize = 10

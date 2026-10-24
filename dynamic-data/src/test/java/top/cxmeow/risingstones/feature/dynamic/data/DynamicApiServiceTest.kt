@@ -12,6 +12,17 @@ import top.cxmeow.risingstones.feature.dynamic.domain.*
 import top.cxmeow.risingstones.network.*
 
 class DynamicApiServiceTest {
+    @Test fun rawLikeFactsKeepMissingStateAndCountSeparateFromLegacyDefaults() = runTest {
+        val transport=Transport();val service=service(transport)
+        for((fields,count,liked)in listOf(Triple("",null,null),Triple("\"like_count\":0,",0L,null),Triple("\"like_count\":\"8\",\"is_like\":0,",8L,false),Triple("\"like_count\":2147483648,\"is_like\":\"1\",",2147483648L,true),Triple("\"like_count\":-1,\"is_like\":2,",null,null))) {
+            transport.body="""{"code":10000,"data":{$fields"id":17,"comment_count":90,"from_info":{"likes":100}}}"""
+            val detail=service.fetchDetail(17);assertNotNull(detail.sourceLikeFacts)
+            assertEquals(count,detail.sourceLikeFacts!!.count);assertEquals(liked,detail.sourceLikeFacts!!.isLiked)
+            transport.body="""{"code":10000,"data":{"rows":[{$fields"id":17}],"count":1}}"""
+            assertEquals(detail.sourceLikeFacts,service.fetchFeed(DynamicListQuery()).items.single().sourceLikeFacts)
+        }
+    }
+
     @Test
     fun feedMapsOriginalAndSharedContentAndCarriesOpaqueCursor() = runTest {
         val transport = Transport()

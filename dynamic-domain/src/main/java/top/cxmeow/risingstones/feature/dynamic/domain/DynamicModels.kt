@@ -23,7 +23,11 @@ data class DynamicReference(
     val imageUrls: List<String>,
 )
 
-data class DynamicEntry(
+data class DynamicSourceLikeFacts(val isLiked: Boolean?, val count: Long?) {
+    init { require(count == null || count >= 0) }
+}
+
+data class DynamicEntry @JvmOverloads constructor(
     val id: Int,
     val author: DynamicAuthor,
     val contentHtml: String,
@@ -33,7 +37,25 @@ data class DynamicEntry(
     val likeCount: Int,
     val isLiked: Boolean,
     val reference: DynamicReference?,
-)
+    /** Raw response facts. Null only for legacy/manual models; nullable members mean unknown. */
+    val sourceLikeFacts: DynamicSourceLikeFacts? = null,
+) {
+    /** Original JVM copy entry points retain the source snapshot and original mask meanings. */
+    fun copy(id: Int, author: DynamicAuthor, contentHtml: String, imageUrls: List<String>, createdAt: Instant?, commentCount: Int, likeCount: Int, isLiked: Boolean, reference: DynamicReference?): DynamicEntry = DynamicEntry(id, author, contentHtml, imageUrls, createdAt, commentCount, likeCount, isLiked, reference, sourceLikeFacts)
+    companion object {
+        @JvmStatic @Suppress("UNUSED_PARAMETER")
+        fun `copy$default`(source: DynamicEntry, id: Int, author: DynamicAuthor?, contentHtml: String?, imageUrls: List<String>?, createdAt: Instant?, commentCount: Int, likeCount: Int, isLiked: Boolean, reference: DynamicReference?, mask: Int, marker: Any?): DynamicEntry =
+            source.copy(if (mask and 1 != 0) source.id else id,
+                if (mask and 2 != 0) source.author else requireNotNull(author),
+                if (mask and 4 != 0) source.contentHtml else requireNotNull(contentHtml),
+                if (mask and 8 != 0) source.imageUrls else requireNotNull(imageUrls),
+                if (mask and 16 != 0) source.createdAt else createdAt,
+                if (mask and 32 != 0) source.commentCount else commentCount,
+                if (mask and 64 != 0) source.likeCount else likeCount,
+                if (mask and 128 != 0) source.isLiked else isLiked,
+                if (mask and 256 != 0) source.reference else reference)
+    }
+}
 
 data class DynamicComment(
     val id: Int,

@@ -10,6 +10,18 @@ import top.cxmeow.risingstones.feature.profile.domain.*
 import top.cxmeow.risingstones.network.*
 
 class ProfileApiServiceTest {
+    @Test fun dynamicRowsRetainOnlyTheirOwnOptionalLikeFacts() = runTest {
+        val transport=Transport("{}");val service=ProfileApiService(client(transport),Provider())
+        for((fields,count,liked) in listOf(Triple("",null,null),Triple("\"like_count\":0,",0L,null),Triple("\"like_count\":\"7\",\"is_like\":1,",7L,true),Triple("\"like_count\":9,\"is_like\":\"0\",",9L,false),Triple("\"like_count\":2147483648,\"is_like\":2,",2147483648L,null),Triple("\"like_count\":-1,\"is_like\":null,",null,null),Triple("\"like_count\":\"bad\",\"is_like\":true,",null,null))) {
+            transport.data="""{"rows":[{$fields"id":17,"posts_id":18,"beLikedNum":900,"comment_count":80,"from_info":{"likes":700}}],"count":1}"""
+            val row=service.readSection(ProfileListQuery(ProfileOwner.User("mock"),ProfileSection.Dynamics)).items.single() as ProfileListItem.Content
+            assertEquals(count,row.sourceLikeFacts?.count);assertEquals(liked,row.sourceLikeFacts?.isLiked)
+            if(count==null&&liked==null)assertNull(row.sourceLikeFacts)
+            val post=service.readSection(ProfileListQuery(ProfileOwner.Self,ProfileSection.Posts)).items.single() as ProfileListItem.Content
+            assertNull(post.sourceLikeFacts)
+        }
+    }
+
     @Test fun acceptedCodesReadProfilesWithoutRefreshingOnAuthenticationLookingMessages() = runTest {
         for (code in listOf(10000, 10002)) {
             val transport = Transport(Profile).apply { this.code = code; message = "未登录" }

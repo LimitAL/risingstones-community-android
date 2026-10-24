@@ -35,15 +35,33 @@ data class CommunityProfile(
 enum class ProfileSection { Overview, Posts, Guides, Dynamics, FavoritePosts, FavoriteGuides, Following, Followers }
 enum class ProfileContentKind { Post, Guide, Dynamic }
 data class ProfileContentTarget(val kind: ProfileContentKind, val id: Int)
+/** Optional facts from a dynamic row, never the profile aggregate or an attachment's likes. */
+data class ProfileDynamicLikeFacts(val isLiked: Boolean?, val count: Long?) {
+    init { require(count == null || count >= 0) }
+}
 sealed interface ProfileListItem {
     val key: String
-    data class Content(
+    data class Content @JvmOverloads constructor(
         val target: ProfileContentTarget,
         val title: String,
         val summaryHtml: String,
         val imageUrls: List<String>,
         val createdAt: String?,
-    ) : ProfileListItem { override val key: String get() = "${target.kind}:${target.id}" }
+        val sourceLikeFacts: ProfileDynamicLikeFacts? = null,
+    ) : ProfileListItem {
+        override val key: String get() = "${target.kind}:${target.id}"
+    /** Original JVM copy entry points retain the source snapshot and original mask meanings. */
+    fun copy(target: ProfileContentTarget, title: String, summaryHtml: String, imageUrls: List<String>, createdAt: String?): Content = Content(target, title, summaryHtml, imageUrls, createdAt, sourceLikeFacts)
+    companion object {
+        @JvmStatic @Suppress("UNUSED_PARAMETER")
+        fun `copy$default`(source: Content, target: ProfileContentTarget?, title: String?, summaryHtml: String?, imageUrls: List<String>?, createdAt: String?, mask: Int, marker: Any?): Content =
+            source.copy(if (mask and 1 != 0) source.target else requireNotNull(target),
+                if (mask and 2 != 0) source.title else requireNotNull(title),
+                if (mask and 4 != 0) source.summaryHtml else requireNotNull(summaryHtml),
+                if (mask and 8 != 0) source.imageUrls else requireNotNull(imageUrls),
+                if (mask and 16 != 0) source.createdAt else createdAt)
+    }
+    }
     data class Person(
         val uuid: String,
         val name: String,

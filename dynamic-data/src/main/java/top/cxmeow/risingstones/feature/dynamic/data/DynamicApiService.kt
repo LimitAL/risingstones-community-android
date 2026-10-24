@@ -178,7 +178,9 @@ private fun entry(value: JsonObject): DynamicEntry? {
     return DynamicEntry(value.number("id")?.takeIf { it > 0 } ?: return null,
         value.author(), value.text("mask_content").orEmpty(), imageUrls(value.text("pic_url")),
         value.text("created_at").date(), value.number("comment_count") ?: 0, value.number("like_count") ?: 0,
-        value.number("is_like") == 1, reference)
+        value.number("is_like") == 1, reference,
+        DynamicSourceLikeFacts(when (value.text("is_like")) { "0" -> false; "1" -> true; else -> null },
+            value.text("like_count")?.toLongOrNull()?.takeIf { it >= 0 }))
 }
 
 internal fun comment(value: JsonObject): DynamicComment? = DynamicComment(
