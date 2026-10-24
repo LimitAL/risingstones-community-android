@@ -17,6 +17,39 @@ class ProfileApiService(
     override suspend fun fetchProfile(owner: ProfileOwner): CommunityProfile =
         profile(get("userInfo/getUserInfo", owner.parameters()), owner == ProfileOwner.Self)
 
+    /** Two read endpoints; a failed recent-events endpoint does not discard a valid character snapshot. */
+    suspend fun fetchSelfCharacterProfile(): ProfileCharacterData {
+        val row = get("userInfo/getUserInfo", emptyList())
+        val id = row.text("uuid")?.takeIf(String::isNotBlank) ?: throw ProfileException.InvalidResponse
+        val name = row.text("character_name")?.takeIf(String::isNotBlank) ?: throw ProfileException.InvalidResponse
+        val jobs = (row["careerLevel"] as? JsonArray)?.let { rows ->
+            val parsed = rows.mapNotNull { element ->
+                val job = element as? JsonObject ?: return@mapNotNull null
+                val title = job.text("career")?.trim()?.takeIf { it.isNotEmpty() && it != "-" } ?: return@mapNotNull null
+                val level = job.number("character_level")?.takeIf { it >= 0 } ?: return@mapNotNull null
+                ProfileCharacterJob(title, level, job.text("career_type").orEmpty())
+            }
+            // A malformed or duplicate roster cannot establish that missing jobs are locked.
+            parsed.takeIf { it.size == rows.size && it.map { j -> j.name }.distinct().size == it.size }
+        }
+        val events = try {
+            val rows = getElement("userInfo/getResently", listOf(q("tempsuid", java.util.UUID.randomUUID()))) as? JsonArray
+                ?: throw ProfileException.InvalidResponse
+            val parsed = rows.mapNotNull { element ->
+                val event = element as? JsonObject ?: return@mapNotNull null
+                val detail = event.text("detail")?.trim()?.takeIf { it.isNotEmpty() && it != "-" } ?: return@mapNotNull null
+                val at = profileEventDate(event.text("log_time")) ?: return@mapNotNull null
+                ProfileCharacterEvent(event.text("event_type")?.takeIf(String::isNotBlank), detail, at)
+            }
+            // Empty is authoritative only if the endpoint was structurally valid.
+            parsed.takeIf { it.size == rows.size }?.distinctBy { it.occurredAt to it.detail }
+                ?.sortedWith(compareByDescending<ProfileCharacterEvent> { it.occurredAt }.thenBy { it.detail })
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { null }
+        return ProfileCharacterData(id, name, row.text("area_name").orEmpty(), row.text("group_name").orEmpty(),
+            jobs, row.number("career_publish") == 0, events, row.number("resently_publish") == 0, java.time.Instant.now())
+    }
+
     override suspend fun readSection(query: ProfileListQuery): ProfilePage {
         val section = query.section
         require(section != ProfileSection.Overview)
@@ -46,7 +79,10 @@ class ProfileApiService(
             ?: (rows.size >= PageSize))
     }
 
-    private suspend fun get(path: String, parameters: List<RisingStonesApiQueryItem>): JsonObject {
+    private suspend fun get(path: String, parameters: List<RisingStonesApiQueryItem>): JsonObject =
+        getElement(path, parameters) as? JsonObject ?: throw ProfileException.InvalidResponse
+
+    private suspend fun getElement(path: String, parameters: List<RisingStonesApiQueryItem>): JsonElement {
         if (!canRead) throw ProfileException.Unavailable
         return try {
             val authorizer = sessionProvider.currentAuthorizer() ?: throw ProfileException.AuthenticationRequired
@@ -62,7 +98,7 @@ class ProfileApiService(
     }
 
     private suspend fun request(authorizer: RisingStonesRequestAuthorizer, endpoint: String,
-        parameters: List<RisingStonesApiQueryItem>): JsonObject {
+        parameters: List<RisingStonesApiQueryItem>): JsonElement {
         val path = "api/home/$endpoint"
         val headers = linkedMapOf<String, String>()
         authorizer.authorize(RisingStonesRequestContext(path, RisingStonesAuthenticationRequirement.Required,
@@ -81,7 +117,7 @@ class ProfileApiService(
         } catch (_: IllegalArgumentException) { null } ?: throw ProfileException.InvalidResponse
         val code = envelope.number("code")
         if (RisingStonesResponsePolicy.accepts(code)) {
-            return envelope["data"] as? JsonObject ?: throw ProfileException.InvalidResponse
+            return envelope["data"]?.takeUnless { it is JsonNull } ?: throw ProfileException.InvalidResponse
         }
         when (code) {
             10001, 10403, 10105 -> throw ProfileException.AuthenticationRequired
@@ -178,3 +214,15 @@ private fun images(value: String?) = value.orEmpty().split(',').map(String::trim
         uri.host?.lowercase() in setOf("ff14risingstones.gcloud.com.cn", "ff14risingstones.web.sdo.com",
             "ff14-eo.web.sdo.com", "static.web.sdo.com")
 }.distinct()
+
+private fun profileEventDate(value: String?): java.time.Instant? {
+    val raw = value?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    val zone = java.time.ZoneId.of("Asia/Shanghai")
+    val parsers = listOf<() -> java.time.Instant>(
+        { java.time.Instant.parse(raw) }, { java.time.OffsetDateTime.parse(raw).toInstant() },
+        { java.time.LocalDateTime.parse(raw, java.time.format.DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss").withResolverStyle(java.time.format.ResolverStyle.STRICT)).atZone(zone).toInstant() },
+        { java.time.LocalDateTime.parse(raw).atZone(zone).toInstant() },
+    )
+    for (parse in parsers) try { return parse() } catch (_: java.time.format.DateTimeParseException) { }
+    return null
+}
