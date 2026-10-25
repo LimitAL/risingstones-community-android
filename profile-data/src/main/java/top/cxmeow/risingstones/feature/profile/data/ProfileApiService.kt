@@ -16,9 +16,7 @@ class ProfileApiService(
 
     override suspend fun searchUsers(keywords: String, page: Int, limit: Int): ProfileUserSearchPage {
         require(keywords.isNotBlank() && page >= 1 && limit >= 1)
-        val rows = getElement("api/common/search", listOf(q("type", 6), q("keywords", keywords),
-            q("part_id", ""), q("orderBy", "comment"), q("page", page), q("limit", limit), q("pageTime", ""))) as? JsonArray
-            ?: throw ProfileException.InvalidResponse
+        val rows = userSearchRows(keywords,page,limit)
         val users = rows.mapNotNull { element ->
             val row = element as? JsonObject ?: return@mapNotNull null
             val scalar = row["uuid"] as? JsonPrimitive ?: return@mapNotNull null
@@ -31,6 +29,30 @@ class ProfileApiService(
         }
         return ProfileUserSearchPage(users, page, rows.size >= limit)
     }
+
+    /** Matches the iOS mention panel; does not change the general DynamicListQuery limit. */
+    suspend fun fetchMentionCandidateSnapshot(): ProfileMentionCandidateSnapshot {
+        val data=getElement("userRelation/followList",listOf(q("page",1),q("limit",5000))) as? JsonObject
+            ?: throw ProfileException.InvalidResponse
+        val rows=data["rows"] as? JsonArray ?: throw ProfileException.InvalidResponse
+        val result=mentionRows(rows);val count=sourceCount(data["count"])
+        val complete=when {
+            count==null -> ProfileMentionCompleteness.Unknown
+            count==rows.size.toLong() && result.second==0 && result.third==0 -> ProfileMentionCompleteness.Complete
+            else -> ProfileMentionCompleteness.Partial
+        }
+        return ProfileMentionCandidateSnapshot(result.first,count,rows.size,result.second,result.third,complete,java.time.Instant.now())
+    }
+
+    suspend fun searchMentionCandidates(keywords:String,page:Int=1,limit:Int=20):ProfileMentionSearchPage {
+        require(keywords.isNotBlank() && page>=1 && limit in 1..100)
+        val rows=userSearchRows(keywords,page,limit);val result=mentionRows(rows)
+        return ProfileMentionSearchPage(result.first,page,rows.size,result.second,result.third,rows.size>=limit)
+    }
+    private suspend fun userSearchRows(keywords:String,page:Int,limit:Int):JsonArray =
+        getElement("api/common/search",listOf(q("type",6),q("keywords",keywords),q("part_id",""),
+            q("orderBy","comment"),q("page",page),q("limit",limit),q("pageTime",""))) as? JsonArray
+            ?: throw ProfileException.InvalidResponse
 
     override suspend fun fetchProfile(owner: ProfileOwner): CommunityProfile = fetchProfileWithGuild(owner).profile
 
@@ -330,4 +352,21 @@ private fun badgeInteger(value:JsonElement?):Long? {
     if(scalar.isString)return raw.toLongOrNull()
     scalar.booleanOrNull?.let{return if(it)1L else 0L}
     return try{raw.toBigDecimalOrNull()?.longValueExact()}catch(_:ArithmeticException){null}
+}
+
+private fun mentionRows(rows:JsonArray):Triple<List<ProfileMentionCandidate>,Int,Int> {
+    var invalid=0;var duplicates=0;val seen=hashSetOf<String>()
+    fun identity(value:JsonElement?):String? {
+        val scalar=value as? JsonPrimitive ?: return null
+        if(!scalar.isString && scalar.booleanOrNull!=null)return null
+        return meaningfulProfileText(scalar.contentOrNull)?.takeIf { '#' !in it && it.none(Char::isISOControl) }
+    }
+    val candidates=rows.mapNotNull { element ->
+        val row=element as? JsonObject ?: run { invalid++;return@mapNotNull null };val uuid=identity(row["uuid"]);val name=identity(row["character_name"])
+        if(uuid==null || name==null){invalid++;return@mapNotNull null}
+        if(!seen.add(uuid)){duplicates++;return@mapNotNull null}
+        ProfileMentionCandidate(uuid,name,meaningfulProfileText(row.text("area_name")).orEmpty(),
+            meaningfulProfileText(row.text("group_name")).orEmpty(),profileImage(row.text("avatar")))
+    }
+    return Triple(candidates,invalid,duplicates)
 }
