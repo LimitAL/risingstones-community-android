@@ -164,6 +164,19 @@ internal class DynamicActionApiDelegate(
         ) { Unit }
     }
 
+    suspend fun publishText(scope: DynamicActionScope, draft: DynamicPublishDraft): DynamicEntry {
+        require(draft.images.isEmpty() && draft.contentHtml.isNotBlank())
+        return write(
+            scope.officialFor(sessionProvider), DynamicPath + "create", RisingStonesHttpMethod.Post,
+            mentionFields(draft.mentions) + listOf(
+                "content" to draft.contentHtml, "scope" to draft.visibility.wireValue.toString(),
+                "pic_url" to "", "tempsuid" to java.util.UUID.randomUUID().toString()),
+            acceptedCodes = setOf(10000),
+            query = listOf(q("tempsuid", java.util.UUID.randomUUID().toString())),
+        ) { value -> entry(value as? JsonObject ?: throw DynamicException.InvalidResponse)
+            ?: throw DynamicException.InvalidResponse }
+    }
+
     suspend fun publish(scope: DynamicActionScope, draft: DynamicPublishDraft) {
         val imageUrls = draft.images.map { image ->
             image.boundTo(scope, DynamicImagePurpose.Publishing).url

@@ -32,6 +32,12 @@ class DynamicApiService(
     /** Text comments need no image capability; existing general-purpose scope remains unchanged. */
     suspend fun beginTextCommentScope(): DynamicActionScope = actions.beginTextCommentScope()
 
+    /** Pure text publishing captures no image capability. */
+    suspend fun beginTextPublishingScope(): DynamicActionScope = actions.beginTextCommentScope()
+
+    /** Strict iOS create contract; existing general publishing consumers remain compatible. */
+    suspend fun publishText(scope: DynamicActionScope, draft: DynamicPublishDraft): DynamicEntry = actions.publishText(scope, draft)
+
     override suspend fun entryEligibility(scope: DynamicActionScope, dynamicId: Int) =
         actions.entryEligibility(scope, dynamicId)
 
@@ -170,7 +176,7 @@ internal fun <T> JsonObject.page(query: DynamicListQuery, map: (JsonObject) -> T
         ?: (rows.size >= limit), text("pageTime"), total)
 }
 
-private fun entry(value: JsonObject): DynamicEntry? {
+internal fun entry(value: JsonObject): DynamicEntry? {
     val origin = DynamicOrigin.entries.firstOrNull { it.wireValue == value.number("from") } ?: DynamicOrigin.Unknown
     val source = value["from_info"] as? JsonObject
     val reference = if (origin == DynamicOrigin.Original || source == null) null else DynamicReference(
