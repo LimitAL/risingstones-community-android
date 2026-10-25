@@ -96,7 +96,7 @@ class DutyRecruitmentApiService(
     private val json: Json = Json { ignoreUnknownKeys = true; explicitNulls = false },
     private val temporarySessionId: String = UUID.randomUUID().toString(),
 ) : RecruitmentBrowsingService, RecruitmentResponseEligibilityService, RecruitmentActionEligibilityService,
-    RolePlayDirectoryService, RecruitmentAuthorService {
+    RolePlayDirectoryService, RecruitmentAuthorService, top.cxmeow.risingstones.feature.recruitment.domain.MyDutyRecruitmentReader {
     private val rolePlayDirectory = RolePlayDirectoryApiReader(temporarySessionId) { perform(it) }
 
     override val canPerformAuthenticatedWrites: Boolean
@@ -108,6 +108,29 @@ class DutyRecruitmentApiService(
 
     override val hasCommunityIdentity: Boolean
         get() = RisingStonesCapability.RecruitmentAuthenticated in sessionProvider.capabilities
+
+    override suspend fun fetchMyDutyRecruitmentPage(page: Int): top.cxmeow.risingstones.feature.recruitment.domain.MyDutyRecruitmentReadPage {
+        require(page > 0)
+        val response = perform(RisingStonesApiRequest("api/home/recruit/myFbRecruitList", query = listOf(
+            q("page", page), q("limit", 10), q("tempsuid", temporarySessionId))),
+            required = true, readCapability = RisingStonesCapability.AccountRead)
+        if ((response["code"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() != 10000) throw DutyRecruitmentException.Business(-1, response.text("msg", "message"))
+        val payload = response.obj("data") ?: throw DutyRecruitmentException.MissingPayload
+        val rows = payload.requiredArray("rows")
+        var invalid = 0; var duplicates = 0; val seen = mutableSetOf<Int>()
+        val items = rows.mapNotNull { raw ->
+            val row = raw as? JsonObject
+            val exactId = (row?.get("id") as? JsonPrimitive)?.contentOrNull?.toIntOrNull()?.takeIf { it > 0 }
+            val summary = exactId?.let { dutySummary(raw) }
+            if (summary == null) { invalid++; null }
+            else if (!seen.add(summary.id)) { duplicates++; null }
+            else top.cxmeow.risingstones.feature.recruitment.domain.MyDutyRecruitmentReadItem(summary, (row?.get("status") as? JsonPrimitive)?.contentOrNull?.toIntOrNull())
+        }
+        val count = (payload["count"] as? JsonPrimitive)?.takeUnless { it.content == "true" || it.content == "false" }
+            ?.contentOrNull?.toLongOrNull()?.takeIf { it >= 0 }
+        return top.cxmeow.risingstones.feature.recruitment.domain.MyDutyRecruitmentReadPage(
+            items, page, count, rows.size, invalid, duplicates, rows.size >= 10, Instant.now())
+    }
 
     override suspend fun fetchDutyRecruitments(query: DutyRecruitmentListQuery): DutyRecruitmentListPage =
         fetchDutyRecruitments(DutyRecruitmentBrowseQuery(query))
