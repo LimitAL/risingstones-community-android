@@ -152,3 +152,5 @@ AAB 和 SHA-256 清单附加到对应 GitHub Release。发布成功后可通过 
 [安全说明](SECURITY.md)私下报告，不要在公开议题中提交凭证、个人响应或可复现的账号接管细节。
 
 本人资料的明确部队ID、部队可空事实及只读照片分页投影见 [本地合同](docs/guild-profile-read-local-20261024.md)。
+
+- [官方普通主题纯文字适配与本地验证边界](docs/official-text-topic-local-20261025.md)：单端点scope与未知结果宿主防重要求。
