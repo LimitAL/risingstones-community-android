@@ -11,8 +11,26 @@ class ProfileApiService(
     private val client: RisingStonesPublicApiClient,
     private val sessionProvider: RisingStonesSessionProvider,
     private val json: Json = Json { ignoreUnknownKeys = true },
-) : ProfileService {
+) : ProfileService, ProfileUserSearchService {
     override val canRead: Boolean get() = RisingStonesCapability.AccountRead in sessionProvider.capabilities
+
+    override suspend fun searchUsers(keywords: String, page: Int, limit: Int): ProfileUserSearchPage {
+        require(keywords.isNotBlank() && page >= 1 && limit >= 1)
+        val rows = getElement("api/common/search", listOf(q("type", 6), q("keywords", keywords),
+            q("part_id", ""), q("orderBy", "comment"), q("page", page), q("limit", limit), q("pageTime", ""))) as? JsonArray
+            ?: throw ProfileException.InvalidResponse
+        val users = rows.mapNotNull { element ->
+            val row = element as? JsonObject ?: return@mapNotNull null
+            val scalar = row["uuid"] as? JsonPrimitive ?: return@mapNotNull null
+            if (!scalar.isString && scalar.booleanOrNull != null) return@mapNotNull null
+            val id = meaningfulProfileText(scalar.contentOrNull) ?: return@mapNotNull null
+            if (id.any(Char::isISOControl)) return@mapNotNull null
+            ProfileUserSearchEntry(id, meaningfulProfileText(row.text("character_name")).orEmpty(),
+                meaningfulProfileText(row.text("area_name")).orEmpty(), meaningfulProfileText(row.text("group_name")).orEmpty(),
+                profileImage(row.text("avatar")), meaningfulProfileText(row.text("profile")), sourceCount(row["fansNum"]))
+        }
+        return ProfileUserSearchPage(users, page, rows.size >= limit)
+    }
 
     override suspend fun fetchProfile(owner: ProfileOwner): CommunityProfile = fetchProfileWithGuild(owner).profile
 
@@ -131,7 +149,8 @@ class ProfileApiService(
 
     private suspend fun request(authorizer: RisingStonesRequestAuthorizer, endpoint: String,
         parameters: List<RisingStonesApiQueryItem>): JsonElement {
-        val path = "api/home/$endpoint"
+        // Only the new fixed read endpoint is outside api/home; other profile paths are unchanged.
+        val path = if (endpoint == "api/common/search") endpoint else "api/home/$endpoint"
         val headers = linkedMapOf<String, String>()
         authorizer.authorize(RisingStonesRequestContext(path, RisingStonesAuthenticationRequirement.Required,
             RisingStonesCapability.AccountRead), RisingStonesHeaderSink { key, value -> headers[key] = value })
@@ -194,7 +213,7 @@ private fun profile(row: JsonObject, self: Boolean): CommunityProfile {
     }
     val follow = row["followFansiNum"] as? JsonObject
     return CommunityProfile(id, row.text("character_name").orEmpty(), row.text("area_name").orEmpty(),
-        row.text("group_name").orEmpty(), images(row.text("avatar")).firstOrNull(), row.text("profile").orEmpty(),
+        row.text("group_name").orEmpty(), profileImage(row.text("avatar")), row.text("profile").orEmpty(),
         self, follow?.number("followNum")?.coerceAtLeast(0) ?: 0, follow?.number("fansNum")?.coerceAtLeast(0) ?: 0,
         row.number("beLikedNum")?.coerceAtLeast(0) ?: 0, facts,
         visibility(visible("career_publish"), careerRows), careers,
@@ -208,7 +227,7 @@ private fun visibility(visible: Boolean, rows: JsonArray?) = when {
 private fun person(row: JsonObject) = ProfileListItem.Person(
     row.text("uuid")?.takeIf(String::isNotBlank) ?: throw ProfileException.InvalidResponse,
     row.text("character_name").orEmpty(), row.text("area_name").orEmpty(), row.text("group_name").orEmpty(),
-    images(row.text("avatar")).firstOrNull(), row.text("profile").orEmpty())
+    profileImage(row.text("avatar")), row.text("profile").orEmpty())
 
 private fun content(row: JsonObject, section: ProfileSection): ProfileListItem.Content {
     val kind = when (section) {
@@ -240,12 +259,14 @@ private fun ProfileOwner.parameters() = when (this) {
 private fun q(key: String, value: Any) = RisingStonesApiQueryItem(key, value.toString())
 private fun JsonObject.text(key: String) = (this[key] as? JsonPrimitive)?.contentOrNull
 private fun JsonObject.number(key: String) = text(key)?.toIntOrNull()
-private fun images(value: String?) = value.orEmpty().split(',').map(String::trim).filter { url ->
+private fun images(value: String?) = value.orEmpty().split(',').mapNotNull(::profileImage).distinct()
+/** A single avatar is a whole URI; commas in its query are not multiple image separators. */
+private fun profileImage(value: String?): String? = value?.trim()?.takeIf { url ->
     val uri = runCatching { URI(url) }.getOrNull()
     uri?.scheme == "https" && uri.userInfo == null && uri.port in listOf(-1, 443) &&
         uri.host?.lowercase() in setOf("ff14risingstones.gcloud.com.cn", "ff14risingstones.web.sdo.com",
             "ff14-eo.web.sdo.com", "static.web.sdo.com")
-}.distinct()
+}
 
 private fun profileEventDate(value: String?): java.time.Instant? {
     val raw = value?.trim()?.takeIf { it.isNotEmpty() } ?: return null

@@ -312,6 +312,17 @@ class ProfileApiServiceTest {
         transport.cancel = true
         try { service(transport).fetchProfile(ProfileOwner.Self); fail() } catch (_: CancellationException) { }
     }
+    @Test fun userDetailAndSharedPersonAvatarKeepTheSameWholeSafeUri()=runTest {
+        val url="https://static.web.sdo.com/avatar.png?x-oss-process=image/resize,w_100,h_100"
+        val avatar=kotlinx.serialization.json.JsonPrimitive(url)
+        val transport=Transport("""{"uuid":"one","avatar":$avatar}""")
+        val api=service(transport)
+        assertEquals(url,api.fetchProfile(ProfileOwner.User("one")).avatarUrl)
+        transport.data="""{"rows":[{"uuid":"one","avatar":$avatar}]}"""
+        val person=api.readSection(ProfileListQuery(ProfileOwner.User("one"),ProfileSection.Following)).items.single() as ProfileListItem.Person
+        assertEquals(url,person.avatarUrl)
+        assertTrue(transport.requests.all{it.method==RisingStonesHttpMethod.Get})
+    }
     private fun client(transport: Transport) = RisingStonesPublicApiClient(transport, listOf("https://rising.test"))
     private fun service(transport: Transport) = ProfileApiService(client(transport), Provider())
 }
