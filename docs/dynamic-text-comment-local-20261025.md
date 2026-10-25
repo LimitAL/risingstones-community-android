@@ -1,0 +1,9 @@
+# Pure text dynamic comment scope (local, 2026-10-25)
+
+Cached iOS 70d0065 uses the existing dynamic comment form for root comments and replies. This batch adds `DynamicApiService.beginTextCommentScope()`, which captures only `DynamicWrite`; the existing general `beginActionScope()` still captures its original write/image set. A host must supply an operation-bound provider supporting the requested set. Capture and successful operation verification do not upgrade persistent credential permissions.
+
+Only comment requests add a fresh lowercase UUID `tempsuid` in both query and form, matching the cached iOS independently generated request markers. These markers are not identity, authentication or idempotency keys. Existing form fields, strict success code 10000 and no-replay write behavior remain. Other publishing/like/delete/upload requests retain their existing construction.
+
+The new protocol test proves the exact text-only capture and four distinct markers across two intercepted requests. Full local SDK tests: 1493, zero failures; lint and Debug build passed. Public boundary, layer and source checks passed. Repository layout still reports only the two historical documentation path failures in message-response-metadata-local-20261019 and checkpoints/account-medal-abi-20261019; no baseline suppression or unrelated fix was applied.
+
+The Android host separately confines this scope to the comment endpoint, disallows pictures, uses an opaque current actor plus credential epoch, suppresses delete-eligibility reads and tracks uncertain dispatched outcomes. Host integration and native evidence are documented in the Android checkpoint. All business validation uses local intercepted transport; no real comments, accounts, upload, service validation, Maven publication/upgrade, push, Actions or release are qualified. The added method preserves existing source entry points and constructor signatures; no published binary upgrade qualification is claimed.

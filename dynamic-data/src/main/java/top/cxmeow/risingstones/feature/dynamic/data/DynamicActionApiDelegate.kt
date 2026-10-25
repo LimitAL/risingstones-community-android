@@ -30,15 +30,14 @@ internal class DynamicActionApiDelegate(
             (sessionProvider as? RisingStonesExplicitCapabilityProvider)
                 ?.canAttemptCapability(RisingStonesCapability.DynamicWrite) == true
 
-    suspend fun beginActionScope(): DynamicActionScope {
-        val provider = sessionProvider as? RisingStonesCapabilityScopeProvider
-            ?: throw DynamicException.Unavailable
-        val scope = provider.captureCapabilityScope(
-            setOf(
-                RisingStonesCapability.DynamicWrite,
-                RisingStonesCapability.DynamicImageUpload,
-            ),
-        ) ?: throw DynamicException.AuthenticationRequired
+    suspend fun beginActionScope(): DynamicActionScope = captureScope(setOf(
+        RisingStonesCapability.DynamicWrite, RisingStonesCapability.DynamicImageUpload))
+
+    suspend fun beginTextCommentScope(): DynamicActionScope = captureScope(setOf(RisingStonesCapability.DynamicWrite))
+
+    private suspend fun captureScope(capabilities: Set<RisingStonesCapability>): DynamicActionScope {
+        val provider = sessionProvider as? RisingStonesCapabilityScopeProvider ?: throw DynamicException.Unavailable
+        val scope = provider.captureCapabilityScope(capabilities) ?: throw DynamicException.AuthenticationRequired
         return OfficialDynamicActionScope(scope, sessionProvider)
     }
 
@@ -148,6 +147,7 @@ internal class DynamicActionApiDelegate(
                 add("atInfo[$index][uuid]" to mention.uuid)
                 add("atInfo[$index][character_name]" to mention.characterName)
             }
+            add("tempsuid" to java.util.UUID.randomUUID().toString())
             add("content" to draft.contentHtml)
             add("dynamic_id" to draft.dynamicId.toString())
             add("parent_id" to draft.parentId.toString())
@@ -160,6 +160,7 @@ internal class DynamicActionApiDelegate(
             RisingStonesHttpMethod.Post,
             fields,
             acceptedCodes = setOf(10000),
+            query = listOf(q("tempsuid", java.util.UUID.randomUUID().toString())),
         ) { Unit }
     }
 
@@ -323,6 +324,7 @@ internal class DynamicActionApiDelegate(
         method: RisingStonesHttpMethod,
         fields: List<Pair<String, String>>,
         acceptedCodes: Set<Int> = setOf(10000, 10002),
+        query: List<RisingStonesApiQueryItem> = emptyList(),
         validate: (JsonElement?) -> T,
     ): T {
         currentCoroutineContext().ensureActive()
@@ -350,6 +352,7 @@ internal class DynamicActionApiDelegate(
                 client.execute(
                     RisingStonesApiRequest(
                         path = path,
+                        query = query,
                         method = method,
                         headers = headers,
                         body = fields.formBody(),

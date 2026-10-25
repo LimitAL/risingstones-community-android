@@ -29,6 +29,9 @@ class DynamicApiService(
 
     override suspend fun beginActionScope(): DynamicActionScope = actions.beginActionScope()
 
+    /** Text comments need no image capability; existing general-purpose scope remains unchanged. */
+    suspend fun beginTextCommentScope(): DynamicActionScope = actions.beginTextCommentScope()
+
     override suspend fun entryEligibility(scope: DynamicActionScope, dynamicId: Int) =
         actions.entryEligibility(scope, dynamicId)
 

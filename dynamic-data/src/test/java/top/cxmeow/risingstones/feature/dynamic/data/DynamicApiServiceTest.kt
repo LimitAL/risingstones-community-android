@@ -696,6 +696,21 @@ class DynamicApiServiceTest {
         assertEquals(11,last.total);assertFalse(last.hasMore);assertEquals(1,last.items.size)
     }
 
+    @Test fun textScopeCapturesNoImageAndCommentNoncesAreFreshInUrlAndBody() = runTest {
+        val transport=Transport().apply{body="""{"code":10000,"data":[31]}"""}
+        val provider=Provider().apply{textOnly=true};val api=service(transport,provider)
+        val scope=api.beginTextCommentScope()
+        assertEquals(listOf(setOf(RisingStonesCapability.DynamicWrite)),provider.capturedCapabilities)
+        val nonces=mutableSetOf<String>()
+        repeat(2){api.comment(scope,DynamicCommentDraft(7,"<p>Exact</p>"))}
+        transport.requests.forEach { request ->
+            nonces+=requireNotNull(request.url.toHttpUrl().queryParameter("tempsuid"))
+            nonces+=request.formFields().single{it.first=="tempsuid"}.second
+            assertEquals("",request.formFields().single{it.first=="comment_pic"}.second)
+        }
+        assertEquals(4,nonces.size);scope.close()
+    }
+
     private fun service(transport: Transport, provider: Provider = Provider()) = DynamicApiService(client(transport), provider)
     private fun client(transport: Transport) = RisingStonesPublicApiClient(transport, listOf("https://rising.test"))
 
@@ -729,6 +744,7 @@ private class Provider : RisingStonesSessionProvider, RisingStonesCapabilityScop
     var completions = 0
     var current = true
     var allowWrites = true
+    var textOnly = false
     val capturedCapabilities = mutableListOf<Set<RisingStonesCapability>>()
     override suspend fun currentAuthorizer() = Authorizer
     override suspend fun refreshAuthorizer(): RisingStonesRequestAuthorizer { refreshes++; return Authorizer }
@@ -739,11 +755,8 @@ private class Provider : RisingStonesSessionProvider, RisingStonesCapabilityScop
     override suspend fun beginCapabilityAttempt(context: RisingStonesRequestContext) = attempt()
     override suspend fun captureCapabilityScope(capabilities: Set<RisingStonesCapability>): RisingStonesCapabilityScope? {
         capturedCapabilities += capabilities
-        if (!allowWrites || capabilities != setOf(
-                RisingStonesCapability.DynamicWrite,
-                RisingStonesCapability.DynamicImageUpload,
-            )
-        ) return null
+        if (!allowWrites || capabilities != setOf(RisingStonesCapability.DynamicWrite,RisingStonesCapability.DynamicImageUpload)
+            && !(textOnly && capabilities == setOf(RisingStonesCapability.DynamicWrite))) return null
         return object : RisingStonesCapabilityScope {
         override val authorizer = Authorizer
         private var open = true
