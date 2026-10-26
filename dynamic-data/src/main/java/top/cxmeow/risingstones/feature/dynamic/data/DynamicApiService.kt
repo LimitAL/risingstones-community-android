@@ -38,6 +38,9 @@ class DynamicApiService(
     /** Strict iOS create contract; existing general publishing consumers remain compatible. */
     suspend fun publishText(scope: DynamicActionScope, draft: DynamicPublishDraft): DynamicEntry = actions.publishText(scope, draft)
 
+    /** 动态图片专用严格创建合同，图片必须属于当前发布作用域；不改变既有通用发布或评论规则。 */
+    suspend fun publishImagesStrict(scope: DynamicActionScope, draft: DynamicPublishDraft): DynamicEntry = actions.publishImagesStrict(scope,draft)
+
     override suspend fun entryEligibility(scope: DynamicActionScope, dynamicId: Int) =
         actions.entryEligibility(scope, dynamicId)
 

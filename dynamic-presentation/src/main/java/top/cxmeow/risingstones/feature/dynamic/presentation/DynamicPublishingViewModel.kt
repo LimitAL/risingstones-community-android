@@ -239,11 +239,16 @@ class DynamicPublishingViewModel(
         mutableState.value = initialState.copy(relayPostTitle = null, usable = false, error = error)
     }
 
+    private var scopeIncludesImages=false
     private suspend fun captureScope(token: Long): DynamicActionScope = scopeMutex.withLock {
         if (token != generation) throw CancellationException()
         if (!canPublish) throw DynamicException.AuthenticationRequired
+        val includeImages=state.value.images.isNotEmpty()
+        val factory=actions as? DynamicPublishingScopeFactory
+        if(factory!=null && includeImages && !scopeIncludesImages) { scope?.close();scope=null }
         scope?.let { requireCurrent(token, it); return@withLock it }
-        val created = actions.beginActionScope()
+        val created = factory?.beginPublishingScope(includeImages) ?: actions.beginActionScope()
+        scopeIncludesImages=includeImages
         if (token != generation) {
             created.close()
             throw CancellationException()
@@ -260,7 +265,8 @@ class DynamicPublishingViewModel(
     private suspend fun requireCurrent(token: Long, current: DynamicActionScope) {
         currentCoroutineContext().ensureActive()
         if (token != generation) throw CancellationException()
-        if (!canPublish || scope !== current || !current.isCurrent()) throw DynamicException.AuthenticationRequired
+        if (scope !== current) throw CancellationException("Publishing scope retired")
+        if (!canPublish || !current.isCurrent()) throw DynamicException.AuthenticationRequired
     }
 
     private fun launchScoped(
