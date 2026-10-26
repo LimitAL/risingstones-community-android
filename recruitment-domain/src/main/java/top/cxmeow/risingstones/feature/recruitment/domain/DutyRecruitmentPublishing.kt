@@ -1,6 +1,6 @@
 package top.cxmeow.risingstones.feature.recruitment.domain
 
-/** Offline authoring contract only. No create/listing HTTP transport is installed. */
+/** 副本招募创建合同；生产适配与离线实现均需由宿主显式注入，不包含上下架或删除能力。 */
 interface DutyRecruitmentPublisher { suspend fun create(draft: DutyRecruitmentCreateDraft): DutyRecruitmentCreateResult }
 data class DutyRecruitmentCreateResult(val recruitmentId: Int)
 data class DutyRecruitmentCreateDraft(val form: DutyRecruitmentPublishForm, val listsImmediately: Boolean)
