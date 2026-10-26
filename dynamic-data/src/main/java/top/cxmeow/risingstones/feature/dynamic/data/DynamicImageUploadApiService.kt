@@ -34,7 +34,11 @@ import top.cxmeow.risingstones.network.RisingStonesHttpRequest
 import top.cxmeow.risingstones.network.RisingStonesPublicApiClient
 import top.cxmeow.risingstones.network.RisingStonesResponsePolicy
 
-/** Uploads one explicitly selected image; the caller owns the surrounding operation scope. */
+/** Uploads one explicitly selected image; the caller owns the surrounding operation scope.
+ *
+ * 服务端 startTime/expiredTime 决定签名区间，本机时钟不额外裁决临时凭据有效性。
+ * @param nowEpochSeconds 保留旧构造函数及命名参数兼容性，不调用该时钟，也不缓存或重试上传。
+ */
 class DynamicImageUploadApiService(
     private val client: RisingStonesPublicApiClient,
     private val sessionProvider: RisingStonesSessionProvider,
@@ -117,9 +121,8 @@ class DynamicImageUploadApiService(
             val start = (data["startTime"] as? JsonPrimitive)?.longOrNull ?: throw DynamicException.InvalidResponse
             val expiry = (data["expiredTime"] as? JsonPrimitive)?.longOrNull ?: throw DynamicException.InvalidResponse
             val keyDir = data.secret("keyDir")
-            val now = nowEpochSeconds()
             val publishingDirectoryMatches = purpose != DynamicImagePurpose.Publishing || keyDir.startsWith("dynamic/")
-            if (start <= 0 || start > now || now >= expiry || start >= expiry || !validDirectory(keyDir) ||
+            if (start <= 0 || start >= expiry || !validDirectory(keyDir) ||
                 !publishingDirectoryMatches) {
                 throw DynamicException.ImageUploadFailed
             }

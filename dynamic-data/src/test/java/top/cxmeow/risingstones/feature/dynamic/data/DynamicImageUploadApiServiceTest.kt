@@ -52,12 +52,12 @@ class DynamicImageUploadApiServiceTest {
         assertEquals(setOf(RisingStonesCapability.DynamicImageUpload), fixture.granted)
     }
 
-    @Test fun malformedAndExpiredTokensNeverReachPutOrGrantCapability() = runTest {
+    @Test fun malformedAndInvalidIntervalsNeverReachPutOrGrantCapability() = runTest {
         listOf(
             ValidToken.replace("guild/fixture", "../fixture"),
             ValidToken.replace("guild/fixture", "guild//fixture"),
-            ValidToken.replace("\"expiredTime\":2000", "\"expiredTime\":999"),
-            ValidToken.replace("\"startTime\":900", "\"startTime\":1100"),
+            ValidToken.replace("\"expiredTime\":2000", "\"expiredTime\":900"),
+            ValidToken.replace("\"startTime\":900", "\"startTime\":2001"),
             ValidToken.replace("\"tmpSecretKey\":\"synthetic-secret\"", "\"tmpSecretKey\":123"),
             "{\"code\":10000,\"data\":null}",
             ValidToken.replace("\"code\":10000", "\"code\":\"10000\""),
@@ -67,6 +67,61 @@ class DynamicImageUploadApiServiceTest {
             assertTrue(error is DynamicException.ImageUploadFailed || error is DynamicException.InvalidResponse)
             assertEquals(1, fixture.requests.size)
             assertEquals(0, fixture.completions)
+            assertEquals(1, fixture.closedAttempts)
+        }
+    }
+
+    @Test fun serverIntervalSignsWithoutConsultingAnUnreliablePhoneClock() = runTest {
+        for (publishing in listOf(false, true)) for (phone in listOf(840L, 2060L, Long.MIN_VALUE, Long.MAX_VALUE)) {
+            var clockReads = 0
+            val fixture = UploadFixture { clockReads++; phone }
+            fixture.respond = { request ->
+                val url = request.url.toHttpUrl()
+                when (request.method) {
+                    RisingStonesHttpMethod.Get -> {
+                        check(url.encodedPath == "/api/common/getCOSTokenI")
+                        check(url.queryParameter("channel") == if (publishing) "dynamic" else "default")
+                        response(body = if (publishing) ValidToken.replace("guild/fixture", "dynamic/fixture") else ValidToken)
+                    }
+                    RisingStonesHttpMethod.Put -> {
+                        check(url.host == "ff14risingstones.gcloud.com.cn")
+                        check(url.encodedPath.startsWith(if (publishing) "/dynamic/fixture/" else "/guild/fixture/"))
+                        val signature = requireNotNull(request.headers["Authorization"])
+                        assertTrue(signature.contains("q-sign-time=900;2000"))
+                        assertTrue(signature.contains("q-key-time=900;2000"))
+                        assertFalse(request.headers.keys.any { it.equals("Cookie", true) })
+                        response()
+                    }
+                    else -> error("Unmatched synthetic request")
+                }
+            }
+            if (publishing) fixture.service.uploadPublishingImage(fixture.scope, image())
+            else fixture.service.uploadCommentImage(fixture.scope, image())
+            assertEquals(0, clockReads)
+            assertEquals(2, fixture.requests.size)
+            assertEquals(1, fixture.completions)
+            assertEquals(0, fixture.refreshes)
+            assertEquals(1, fixture.closedAttempts)
+        }
+    }
+
+    @Test fun invalidServerIntervalsCannotPutOrGrantEvenWhenThePhoneClockWouldAllowThem() = runTest {
+        val intervals = listOf("0" to "2000", "-1" to "2000", "2000" to "2000", "2001" to "2000",
+            "900.5" to "2000", "null" to "2000", "\"NaN\"" to "2000", "900" to "\"Infinity\"",
+            "900" to "9223372036854775808", "900" to "-1")
+        for ((start, expiry) in intervals) {
+            val fixture = UploadFixture { error("The local clock must not be consulted") }
+            fixture.respond = { request ->
+                check(request.method == RisingStonesHttpMethod.Get && request.url.toHttpUrl().encodedPath == "/api/common/getCOSTokenI")
+                response(body = ValidToken.replace("\"startTime\":900", "\"startTime\":$start")
+                    .replace("\"expiredTime\":2000", "\"expiredTime\":$expiry"))
+            }
+            val error = runCatching { fixture.service.uploadCommentImage(fixture.scope, image()) }.exceptionOrNull()
+            assertTrue("Rejected interval $start / $expiry", error is DynamicException.ImageUploadFailed || error is DynamicException.InvalidResponse)
+            assertEquals(1, fixture.requests.size)
+            assertEquals(0, fixture.completions)
+            assertTrue(fixture.granted.isEmpty())
+            assertEquals(0, fixture.refreshes)
             assertEquals(1, fixture.closedAttempts)
         }
     }
@@ -205,7 +260,7 @@ class DynamicImageUploadApiServiceTest {
     }
 }
 
-private class UploadFixture {
+private class UploadFixture(clock: () -> Long = { 1000 }) {
     var current = true
     var completions = 0
     var closedAttempts = 0
@@ -256,7 +311,7 @@ private class UploadFixture {
             requests += request
             return respond(request)
         }
-    }), provider, nowEpochSeconds = { 1000 })
+    }), provider, nowEpochSeconds = clock)
 }
 
 /** A terminating in-memory transport: no token acquisition or PUT can reach a socket. */
