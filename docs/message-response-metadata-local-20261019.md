@@ -10,4 +10,4 @@
 
 明确ABI基线49eba3f：37既有公开类成员/描述符无移除，9私有实现类排除且不承诺其ABI；冻结的旧Java ResponsePage/Status构造/copy消费者换候选依赖运行PASS。另复跑此前ae82冻结Kotlin CommunityMessage默认构造/copy消费者PASS，仅作该旧模型范围资格，不能冒称全部历史二进制兼容。Java基线夹具首次getter误写getIsRecruiting的编译错误修正为isRecruiting后再冻结，未修改冻结class以适配候选。
 
-证据：/Users/arins/Documents/Codex/2026-10-19/task/evidence/community-response-metadata-20261019/{sdk-verification.json,maven-result.json,abi-result.json,local-artifacts.json}。没有远程发布、push或Actions；不宣称真实API、iOS原生观察或宿主完整UI资格。宿主资格由Android独立检查点记录。
+本机审计证据索引：2026-10-19 批次 `community-response-metadata-20261019`，文件 `sdk-verification.json`、`maven-result.json`、`abi-result.json`、`local-artifacts.json`。原始本机目录由私有审计记录定位，证据文件不随本仓库发行；此处为批次索引，不是仓库内相对链接。没有远程发布、push或Actions；不宣称真实API、iOS原生观察或宿主完整UI资格。宿主资格由Android独立检查点记录。

@@ -1,9 +1,19 @@
-# Pure text dynamic comment scope (local, 2026-10-25)
+# 动态纯文字评论作用域（2026-10-25，本地批次）
 
-Cached iOS 70d0065 uses the existing dynamic comment form for root comments and replies. This batch adds `DynamicApiService.beginTextCommentScope()`, which captures only `DynamicWrite`; the existing general `beginActionScope()` still captures its original write/image set. A host must supply an operation-bound provider supporting the requested set. Capture and successful operation verification do not upgrade persistent credential permissions.
+本说明记录 SDK 批次 `db7533354d4daa23bba02d573c7ddee1470afb2d`，设计依据为缓存 iOS `70d0065`。下述 1493 项测试及构建结果属于该历史批次，不是本次文档修订重新执行的结果。
 
-Only comment requests add a fresh lowercase UUID `tempsuid` in both query and form, matching the cached iOS independently generated request markers. These markers are not identity, authentication or idempotency keys. Existing form fields, strict success code 10000 and no-replay write behavior remain. Other publishing/like/delete/upload requests retain their existing construction.
+## API 与责任边界
 
-The new protocol test proves the exact text-only capture and four distinct markers across two intercepted requests. Full local SDK tests: 1493, zero failures; lint and Debug build passed. Public boundary, layer and source checks passed. Repository layout still reports only the two historical documentation path failures in message-response-metadata-local-20261019 and checkpoints/account-medal-abi-20261019; no baseline suppression or unrelated fix was applied.
+根评论与回复沿用既有动态评论表单；本批不另造评论端点。
 
-The Android host separately confines this scope to the comment endpoint, disallows pictures, uses an opaque current actor plus credential epoch, suppresses delete-eligibility reads and tracks uncertain dispatched outcomes. Host integration and native evidence are documented in the Android checkpoint. All business validation uses local intercepted transport; no real comments, accounts, upload, service validation, Maven publication/upgrade, push, Actions or release are qualified. The added method preserves existing source entry points and constructor signatures; no published binary upgrade qualification is claimed.
+`DynamicApiService.beginTextCommentScope()` 仅捕获 `DynamicWrite`，不要求图片能力；既有 `beginActionScope()` 保留原来的写入／图片能力集合。接入方须提供支持所请求能力、绑定当前操作与身份代次的 provider。捕获作用域与成功操作校验不会提升持久凭据权限。
+
+能力集合不等于端点白名单：将操作限定到评论端点、禁止图片、绑定不透明当前身份及凭据代次、抑制删除资格读取、记录已发送但结果未知的状态，均由 Android 宿主的独立 provider／适配承担。不能把 SDK 这一能力捕获方法描述成全局只允许评论的端点限制。
+
+原批次为评论请求的 query 与 form 分别生成新的小写 UUID `tempsuid`。两次拦截请求有四个不同标记；它们不是身份、认证凭据或幂等键，不能据此安全地重发结果未知的评论。既有评论字段及严格成功码 `10000` 保留，写入不自动重放。原批次没有改变其他发布、点赞、删除及上传请求的构造；后续接口变更由各自批次记录，不以本说明概括当前全部接口的标记规则。
+
+## 历史验证与未验范围
+
+原协议测试验证纯文字能力捕获及上述四个标记。该批次记录：完整本地 SDK 单测 1493 项、零失败，lint 和 Debug 构建通过，公开边界、分层及源码检查通过。原记录中的两份历史路径文档检查失败保持为当时失败，未通过抑制基线或无关修复改变结果。本说明原版本全文英文，还触发既有中文文档规则；本次仅修正文档，不将历史失败追认为通过。
+
+宿主集成及原生证据由 Android 独立检查点记录，不因 SDK 测试通过而自动获得资格。全部业务验证使用本地拦截传输；没有真实评论、账号、上传、服务验证、Maven 发布／升级、push、Actions 或版本发行资格。新增方法保留既有源码入口与构造签名，不宣称已发布制品的二进制升级资格。本次中文说明也不关闭后续发布合同测试或未知结果恢复的待办。
