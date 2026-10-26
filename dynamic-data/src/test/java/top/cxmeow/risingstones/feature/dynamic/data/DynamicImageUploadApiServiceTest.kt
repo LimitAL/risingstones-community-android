@@ -41,7 +41,7 @@ class DynamicImageUploadApiServiceTest {
     }
 
     @Test fun publishingUsesDynamicChannelAndBindsTheResultToPublishing() = runTest {
-        val fixture = UploadFixture()
+        val fixture = publishingDirectoryFixture("dynamic/fixture", allowPut = true)
         val result = fixture.service.uploadPublishingImage(fixture.scope, image())
         val token = fixture.requests[fixture.requests.size - 2]
 
@@ -155,6 +155,32 @@ class DynamicImageUploadApiServiceTest {
         assertTrue(fixture.requests.last().url.endsWith(".webp"))
     }
 
+    @Test fun publishingRejectsForeignPrefixesAndUnsafeSeparatorsBeforePut() = runTest {
+        val invalid = listOf("guild/fixture", "default/fixture", "posts/fixture", "dynamic-other/fixture",
+            "dynamics/fixture", "Dynamic/fixture", "dynamic", "/dynamic/fixture", "dynamic/fixture/",
+            "dynamic//fixture", "dynamic/./fixture", "dynamic/../fixture", "dynamic/fixture/..",
+            "dynamic\\fixture", "dynamic/%2e%2e/fixture", "dynamic/%2Ffixture", "dynamic/fixture%252fother",
+            "dynamic/fixture?x=1", "dynamic/fixture#fragment", "dynamic/／fixture")
+        for (directory in invalid) {
+            val fixture = publishingDirectoryFixture(directory, allowPut = false)
+            val error = runCatching { fixture.service.uploadPublishingImage(fixture.scope, image()) }.exceptionOrNull()
+            assertTrue(directory, error is DynamicException.ImageUploadFailed)
+            assertEquals(directory, 1, fixture.requests.size)
+            assertEquals(0, fixture.completions); assertTrue(fixture.granted.isEmpty())
+            assertEquals(1, fixture.closedAttempts)
+        }
+    }
+
+    @Test fun publishingKeepsLegalNestedDirectorySpellingWithoutDecodingOrNormalization() = runTest {
+        for (directory in listOf("dynamic/fixture", "dynamic/2026-10_26/A.B", "dynamic/.hidden", "dynamic/name..part")) {
+            val fixture = publishingDirectoryFixture(directory, allowPut = true)
+            val result = fixture.service.uploadPublishingImage(fixture.scope, image())
+            assertEquals(2, fixture.requests.size)
+            assertTrue((result as BoundDynamicUploadedImage).url.startsWith("https://ff14risingstones.gcloud.com.cn/$directory/"))
+            assertEquals(1, fixture.completions); assertEquals(0, fixture.refreshes)
+        }
+    }
+
     private fun image() = DynamicImageUploadInput(byteArrayOf(1, 2, 3), "image/png")
 
     @Test fun inputRejectsEmptyOversizedAndUnsupportedImagesBeforeNetwork() {
@@ -231,6 +257,24 @@ private class UploadFixture {
             return respond(request)
         }
     }), provider, nowEpochSeconds = { 1000 })
+}
+
+/** A terminating in-memory transport: no token acquisition or PUT can reach a socket. */
+private fun publishingDirectoryFixture(directory: String, allowPut: Boolean): UploadFixture = UploadFixture().apply {
+    respond = { request ->
+        val url = request.url.toHttpUrl()
+        when (request.method) {
+            RisingStonesHttpMethod.Get -> {
+                check(url.encodedPath == "/api/common/getCOSTokenI" && url.queryParameter("channel") == "dynamic")
+                response(body = ValidToken.replace("\"guild/fixture\"", kotlinx.serialization.json.JsonPrimitive(directory).toString()))
+            }
+            RisingStonesHttpMethod.Put -> {
+                check(allowPut && url.host == "ff14risingstones.gcloud.com.cn" && url.encodedPath.startsWith("/$directory/"))
+                response()
+            }
+            else -> error("Unmatched fixture request")
+        }
+    }
 }
 
 private fun response(status: Int = 200, body: String = ValidToken) =

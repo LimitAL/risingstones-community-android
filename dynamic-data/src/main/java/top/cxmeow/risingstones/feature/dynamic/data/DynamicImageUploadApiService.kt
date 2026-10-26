@@ -118,7 +118,9 @@ class DynamicImageUploadApiService(
             val expiry = (data["expiredTime"] as? JsonPrimitive)?.longOrNull ?: throw DynamicException.InvalidResponse
             val keyDir = data.secret("keyDir")
             val now = nowEpochSeconds()
-            if (start <= 0 || start > now || now >= expiry || start >= expiry || !validDirectory(keyDir)) {
+            val publishingDirectoryMatches = purpose != DynamicImagePurpose.Publishing || keyDir.startsWith("dynamic/")
+            if (start <= 0 || start > now || now >= expiry || start >= expiry || !validDirectory(keyDir) ||
+                !publishingDirectoryMatches) {
                 throw DynamicException.ImageUploadFailed
             }
             val uploadUrl = "https://ff14risingstones.gcloud.com.cn/$keyDir/${objectName(input.mimeType)}"
