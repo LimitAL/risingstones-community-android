@@ -12,6 +12,8 @@
 
 动态 HEIF 输入、类型化导入失败及平台验证边界见[图片预处理合同](docs/dynamic-heif-preparation-20261030.md)。原始 HEIF 不作为上传格式。
 
+动态／评论草稿的已选提及移除方法见[本地编辑合同](docs/mention-reminder-controls-20261030.md)，不涉及远端删除或自动发送。
+
 ## 功能模块
 
 - `core`：与认证来源无关的会话、能力和请求授权契约。

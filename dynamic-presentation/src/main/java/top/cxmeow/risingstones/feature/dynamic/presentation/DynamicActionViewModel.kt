@@ -139,6 +139,14 @@ class DynamicActionViewModel(private val actions: DynamicActionService, private 
     private fun openEditor(target: DynamicReplyTarget?) { if (state.value.dynamicId != null && !state.value.isSubmitting) mutableState.update { it.copy(editorOpen = true, replyTarget = target, error = null) } }
     fun cancelEditor() { if (!state.value.isSubmitting) clearDraft() }
     fun updateEditor(text: String, start: Int, end: Int, change: DynamicCommentTextChange? = null) { if (!state.value.isSubmitting) mutableState.update { it.copy(editor = it.editor.edit(text, start, end, change), error = null) } }
+    /** 移除打开的评论草稿中此 UUID 的全部有效提及；提交中不改正文或提醒，不发任何请求。 */
+    fun removeMention(uuid: String) {
+        mutableState.update { value ->
+            if (!value.editorOpen || value.isSubmitting) value
+            else value.copy(editor = value.editor.removeMention(uuid), error = null)
+        }
+    }
+
     fun setEmojiPicker(open: Boolean) = mutableState.update { it.copy(editor = it.editor.copy(emojiPickerOpen = open)) }
     fun insertEmoji(number: Int) { if (number in 1..46 && !state.value.isSubmitting) mutableState.update { it.copy(editor = it.editor.insert("[emo$number]").copy(emojiPickerOpen = false)) } }
     fun setMentionPicker(open: Boolean) {

@@ -88,6 +88,14 @@ class DynamicPublishingViewModel(
         if (editable) mutableState.update { it.copy(editor = it.editor.edit(text, start, end, change), error = null) }
     }
 
+    /** 移除当前草稿中此 UUID 的全部有效提及及后一个普通空格；不提交、不移除普通同名文字。 */
+    fun removeMention(uuid: String) {
+        if (editable) mutableState.update { value ->
+            if (!value.usable || value.isSubmitting || value.completedId != null) value
+            else value.copy(editor = value.editor.removeMention(uuid), error = null)
+        }
+    }
+
     fun setVisibility(value: DynamicVisibility) {
         if (editable) mutableState.update { it.copy(visibility = value) }
     }

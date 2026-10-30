@@ -40,6 +40,24 @@ internal fun DynamicCommentEditorState.insert(value: String, mention: DynamicCom
     return if (range == null) updated else updated.copy(mentions = (updated.mentions + range).sortedBy { it.start })
 }
 
+/** Remove only validated selected spans of this UUID, plus one following ASCII space, as iOS does. */
+internal fun DynamicCommentEditorState.removeMention(uuid: String): DynamicCommentEditorState {
+    if (uuid.isBlank()) return this
+    var priorEnd = 0
+    val valid = mentions.sortedBy { it.start }.filter { range ->
+        (range.start >= priorEnd && range.matches(text)).also { if (it) priorEnd = range.end }
+    }
+    val removed = valid.filter { it.mention.uuid == uuid }
+    if (removed.isEmpty()) return copy(mentions = valid)
+    var result = copy(mentions = valid)
+    for (range in removed.asReversed()) {
+        val end = range.end + if (text.getOrNull(range.end) == ' ') 1 else 0
+        result = result.edit(result.text.removeRange(range.start, end), range.start, range.start,
+            DynamicCommentTextChange(range.start, end))
+    }
+    return result.copy(selectionStart = removed.first().start, selectionEnd = removed.first().start)
+}
+
 internal fun DynamicCommentMentionRange.matches(value: String) = start >= 0 && end in start..value.length &&
     value.substring(start, end) == "@${mention.characterName}"
 internal data class PreparedDynamicComment(val html: String, val mentions: List<DynamicCommentMention>)
