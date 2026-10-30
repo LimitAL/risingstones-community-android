@@ -117,9 +117,10 @@ class DynamicPublishingViewModel(
         if (open && state.value.mentionCandidates.isEmpty()) loadMentions(reset = true)
     }
 
-    fun selectMention(mention: DynamicCommentMention) {
+    fun selectMention(mention: DynamicCommentMention) = selectMention(mention, null)
+    fun selectMention(mention: DynamicCommentMention, replacingAtSignAt: Int?) {
         if (editable) mutableState.update {
-            it.copy(editor = it.editor.insert("@${mention.characterName} ", mention).copy(mentionPickerOpen = false), error = null)
+            it.copy(editor = it.editor.previewMentionInsertion(mention, replacingAtSignAt).copy(mentionPickerOpen = false), error = null)
         }
     }
 

@@ -158,7 +158,8 @@ class DynamicActionViewModel(private val actions: DynamicActionService, private 
         mutableState.update { it.copy(editor = it.editor.copy(mentionPickerOpen = open)) }
         if (open && state.value.mentionCandidates.isEmpty()) loadMentions(true)
     }
-    fun selectMention(mention: DynamicCommentMention) { if (!state.value.isSubmitting) mutableState.update { it.copy(editor = it.editor.insert("@${mention.characterName} ", mention).copy(mentionPickerOpen = false)) } }
+    fun selectMention(mention: DynamicCommentMention) = selectMention(mention, null)
+    fun selectMention(mention: DynamicCommentMention, replacingAtSignAt: Int?) { if (!state.value.isSubmitting) mutableState.update { it.copy(editor = it.editor.previewMentionInsertion(mention, replacingAtSignAt).copy(mentionPickerOpen = false)) } }
     fun loadMentions(reset: Boolean = false) {
         val snapshot = state.value
         if (snapshot.isLoadingMentions || (!reset && !snapshot.mentionHasMore)) return

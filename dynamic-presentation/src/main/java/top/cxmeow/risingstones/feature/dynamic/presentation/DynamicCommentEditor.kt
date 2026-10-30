@@ -93,6 +93,30 @@ fun DynamicCommentEditorState.previewEmojiInsertion(number: Int): DynamicComment
     return copy(selectionStart = point, selectionEnd = point).insert("[emo$number]")
 }
 
+/**
+ * 只读预览选人插入：保留选区原文，在末端插入；不拆有效提及，前方非空白时补一个ASCII空格。
+ * replacingAtSignAt仅在折叠光标前的半角／全角@且不属于有效提及时替换该符号；不补前导空格。
+ * 身份、候选资格、配额及生命周期仍由调用方校验；本方法不提供读取或提交能力。
+ */
+fun DynamicCommentEditorState.previewMentionInsertion(
+    mention: DynamicCommentMention, replacingAtSignAt: Int? = null,
+): DynamicCommentEditorState {
+    val cursor = text.safeOffset(maxOf(selectionStart, selectionEnd))
+    var priorEnd = 0
+    val valid = mentions.sortedBy { it.start }.filter { range ->
+        (range.start >= priorEnd && range.matches(text)).also { if (it) priorEnd = range.end }
+    }
+    val at = replacingAtSignAt?.takeIf { selectionStart == selectionEnd && it == cursor - 1 &&
+        text.getOrNull(it) in listOf('@', '＠') && valid.none { r -> it in r.start until r.end } }
+    val selected = valid.firstOrNull { it.start < cursor && cursor < it.end }
+    val point = at ?: selected?.end?.let { if (text.getOrNull(it) == ' ') it + 1 else it } ?: cursor
+    val leading = at == null && point > 0 && !text.codePointBefore(point).isMentionWhitespace()
+    val base = copy(selectionStart = point, selectionEnd = point + if (at == null) 0 else 1)
+    // Insert the separator separately so it is never included in the identity span.
+    val separated = if (leading) base.insert(" ") else base
+    return separated.insert("@${mention.characterName} ", mention)
+}
+
 /** Remove only validated selected spans of this UUID, plus one following ASCII space, as iOS does. */
 internal fun DynamicCommentEditorState.removeMention(uuid: String): DynamicCommentEditorState {
     if (uuid.isBlank()) return this
@@ -159,3 +183,6 @@ private fun String.emojiHtml(publishing: Boolean): String = buildString {
     }
     append(this@emojiHtml.substring(cursor).escaped())
 }
+
+private fun Int.isMentionWhitespace() = this in 9..13 || this in 0x2000..0x200a ||
+    this in setOf(0x20, 0x85, 0xa0, 0x1680, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000)
