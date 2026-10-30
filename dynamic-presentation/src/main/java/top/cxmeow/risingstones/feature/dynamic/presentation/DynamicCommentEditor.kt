@@ -11,14 +11,51 @@ data class DynamicCommentEditorState(
 )
 
 internal fun DynamicCommentEditorState.edit(newText: String, start: Int, end: Int,
-    change: DynamicCommentTextChange? = null): DynamicCommentEditorState {
+    change: DynamicCommentTextChange? = null, atomicDeletion: Boolean = true): DynamicCommentEditorState {
     if (change == null && newText != text) return copy(text = newText,
         selectionStart = newText.safeOffset(start), selectionEnd = newText.safeOffset(end), mentions = emptyList())
     val delta = newText.length - text.length
-    val replaced = change ?: DynamicCommentTextChange(0, 0)
+    var replaced = change ?: DynamicCommentTextChange(0, 0)
     val valid = replaced.start in 0..text.length && replaced.end in replaced.start..text.length &&
         replaced.end - replaced.start + delta >= 0 && text.take(replaced.start) == newText.take(replaced.start) &&
         text.drop(replaced.end) == newText.drop(replaced.end + delta)
+    if (valid && atomicDeletion && replaced.end > replaced.start && replaced.end + delta == replaced.start) {
+        // Only verified selected spans may expand a user's deletion; stale metadata is never authority.
+        var priorEnd = 0
+        val selected = mentions.sortedBy { it.start }.filter { range ->
+            (range.start >= priorEnd && range.matches(text)).also { if (it) priorEnd = range.end }
+        }
+        val length = replaced.end - replaced.start
+        fun touches(at: Int) = selected.any { it.start < at + length && at < it.end }
+        if (touches(replaced.start)) {
+            // A repeated character can make the same deletion appear inside a token. Prefer the
+            // equivalent deletion outside it (e.g. @@Name -> @Name), as the reference editor does.
+            var candidate = replaced.start
+            while (candidate > 0 && text[candidate - 1] == text[candidate - 1 + length]) {
+                candidate--
+                if (!touches(candidate)) {
+                    replaced = DynamicCommentTextChange(candidate, candidate + length)
+                    break
+                }
+            }
+        }
+        val leftovers = buildList<Pair<Int, Int>> {
+            for (range in selected) if (range.start < replaced.end && replaced.start < range.end) {
+                if (range.start < replaced.start) add(range.start to replaced.start)
+                if (range.end > replaced.end) add(replaced.start to range.end + delta)
+            }
+        }
+        if (leftovers.isNotEmpty()) {
+            val base = copy(mentions = selected).edit(newText, start, end, replaced, atomicDeletion = false)
+            var result = newText
+            for ((from, to) in leftovers.sortedByDescending { it.first }) result = result.removeRange(from, to)
+            fun removedBefore(offset: Int) = leftovers.filter { it.second <= offset }.sumOf { it.second - it.first }
+            val cursor = result.safeOffset(replaced.start - removedBefore(replaced.start))
+            val remaining = base.mentions.map { it.copy(start = it.start - removedBefore(it.start), end = it.end - removedBefore(it.end)) }
+                .filter { it.matches(result) }
+            return base.copy(text = result, selectionStart = cursor, selectionEnd = cursor, mentions = remaining)
+        }
+    }
     val retained = if (!valid) emptyList() else mentions.mapNotNull { range ->
         val adjusted = when {
             replaced.start == replaced.end && delta == 0 -> range
@@ -35,7 +72,7 @@ internal fun DynamicCommentEditorState.edit(newText: String, start: Int, end: In
 internal fun DynamicCommentEditorState.insert(value: String, mention: DynamicCommentMention? = null): DynamicCommentEditorState {
     val from = text.safeOffset(minOf(selectionStart, selectionEnd)); val to = text.safeOffset(maxOf(selectionStart, selectionEnd))
     val next = text.replaceRange(from, to, value); val cursor = from + value.length
-    val updated = edit(next, cursor, cursor, DynamicCommentTextChange(from, to))
+    val updated = edit(next, cursor, cursor, DynamicCommentTextChange(from, to), atomicDeletion = false)
     val range = mention?.let { DynamicCommentMentionRange(from, from + 1 + it.characterName.length, it) }?.takeIf { it.matches(next) }
     return if (range == null) updated else updated.copy(mentions = (updated.mentions + range).sortedBy { it.start })
 }
@@ -53,7 +90,7 @@ internal fun DynamicCommentEditorState.removeMention(uuid: String): DynamicComme
     for (range in removed.asReversed()) {
         val end = range.end + if (text.getOrNull(range.end) == ' ') 1 else 0
         result = result.edit(result.text.removeRange(range.start, end), range.start, range.start,
-            DynamicCommentTextChange(range.start, end))
+            DynamicCommentTextChange(range.start, end), atomicDeletion = false)
     }
     return result.copy(selectionStart = removed.first().start, selectionEnd = removed.first().start)
 }
