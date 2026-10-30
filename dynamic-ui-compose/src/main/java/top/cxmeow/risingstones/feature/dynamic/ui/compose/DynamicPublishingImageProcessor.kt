@@ -12,32 +12,49 @@ import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.*
 import top.cxmeow.risingstones.feature.dynamic.domain.DynamicImageUploadInput
 
+/**
+ * 动态图片导入失败；只区分可确定的大小限制与无法读取/解码，界面不使用 URI 或底层异常文本。
+ * 不改变上传输出格式，也不代表已获取上传资格。
+ */
+class DynamicPublishingImagePreparationException(
+    /** 是否因原始输入超过 20 MiB 而拒绝。 */
+    val tooLarge: Boolean,
+    cause: Throwable? = null,
+) : IllegalArgumentException(if (tooLarge) "Image exceeds 20 MiB" else "Unreadable image", cause)
+
 /** 动态选择图片的临时读取：最多20 MiB，不取得持久图库授权，不写原图或输出文件。 */
 suspend fun prepareDynamicPublishingImage(context:Context,uri:Uri):DynamicImageUploadInput=withContext(Dispatchers.IO) {
+    try {
     val bytes=context.contentResolver.openInputStream(uri)?.use{input ->
         val out=ByteArrayOutputStream();val buffer=ByteArray(8192)
         while(true){currentCoroutineContext().ensureActive();val n=input.read(buffer);if(n<0)break
-            require(out.size().toLong()+n<=20L*1024*1024){"Image exceeds 20 MiB"};out.write(buffer,0,n)}
+            if(out.size().toLong()+n>20L*1024*1024)throw DynamicPublishingImagePreparationException(true);out.write(buffer,0,n)}
         out.toByteArray()
     } ?: error("Unreadable image")
     normalizeDynamicPublishingImage(bytes).also{currentCoroutineContext().ensureActive()}
+    } catch(cancel:CancellationException) { throw cancel
+    } catch(error:DynamicPublishingImagePreparationException) { throw error
+    } catch(error:Exception) { throw DynamicPublishingImagePreparationException(false,error) }
 }
 
-/** 对齐iOS动态规格：归正方向、长边1920、透明PNG，其余JPEG按原始大小分档压缩，不保留原始元数据。 */
+/**
+ * 对齐 iOS 动态规格：归正方向、长边 1920、透明 PNG，其余 JPEG 按原始大小分档压缩，不保留原始元数据。
+ * HEIF 输入依赖平台解码能力；不能解码时拒绝，不将原始 HEIF 作为上传输出。
+ */
 fun normalizeDynamicPublishingImage(bytes: ByteArray): DynamicImageUploadInput {
-    if (bytes.size > 20 * 1_024 * 1_024) throw IllegalArgumentException("Image exceeds 20 MiB")
+    if (bytes.size > 20 * 1_024 * 1_024) throw DynamicPublishingImagePreparationException(true)
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-    if (bounds.outMimeType !in setOf("image/jpeg", "image/png", "image/gif", "image/webp")) {
-        throw IllegalArgumentException("Unsupported image")
+    if (bounds.outMimeType !in setOf("image/jpeg", "image/png", "image/gif", "image/webp", "image/heif")) {
+        throw DynamicPublishingImagePreparationException(false)
     }
-    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw IllegalArgumentException("Unreadable image")
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw DynamicPublishingImagePreparationException(false)
     var sample = 1
     val longestDimension = maxOf(bounds.outWidth, bounds.outHeight).toLong()
     while ((longestDimension + sample - 1) / sample > 3_840) sample *= 2
     val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size,
         BitmapFactory.Options().apply { inSampleSize = sample })
-        ?: throw IllegalArgumentException("Unreadable image")
+        ?: throw DynamicPublishingImagePreparationException(false)
     val orientation = runCatching {
         ExifInterface(ByteArrayInputStream(bytes)).getAttributeInt(ExifInterface.TAG_ORIENTATION,
             ExifInterface.ORIENTATION_NORMAL)
@@ -67,7 +84,7 @@ fun normalizeDynamicPublishingImage(bytes: ByteArray): DynamicImageUploadInput {
         val output = ByteArrayOutputStream()
         val quality = dynamicPublishingJpegQuality(bytes.size)
         if (!oriented.compress(if (isPng) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG,
-                quality, output)) throw IllegalArgumentException("Unreadable image")
+                quality, output)) throw DynamicPublishingImagePreparationException(false)
         return DynamicImageUploadInput(output.toByteArray(), if (isPng) "image/png" else "image/jpeg")
     } finally {
         if (oriented !== bitmap) oriented.recycle()
