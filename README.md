@@ -172,3 +172,5 @@ AAB 和 SHA-256 清单附加到对应 GitHub Release。发布成功后可通过 
 本人资料的明确部队ID、部队可空事实及只读照片分页投影见 [本地合同](docs/guild-profile-read-local-20261024.md)。
 
 - [官方普通主题纯文字适配与本地验证边界](docs/official-text-topic-local-20261025.md)：单端点scope与未知结果宿主防重要求。
+
+推荐用户的可选只读投影、来源分组及身份约束见[本地合同](docs/profile-recommendations-read-local-20261030.md)。

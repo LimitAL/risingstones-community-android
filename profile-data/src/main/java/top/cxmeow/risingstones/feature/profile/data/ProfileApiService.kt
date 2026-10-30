@@ -11,8 +11,25 @@ class ProfileApiService(
     private val client: RisingStonesPublicApiClient,
     private val sessionProvider: RisingStonesSessionProvider,
     private val json: Json = Json { ignoreUnknownKeys = true },
-) : ProfileService, ProfileUserSearchService {
+) : ProfileService, ProfileUserSearchService, ProfileRecommendationService {
     override val canRead: Boolean get() = RisingStonesCapability.AccountRead in sessionProvider.capabilities
+
+    override suspend fun fetchRecommendedUsers(): ProfileRecommendationSnapshot {
+        val rows = getElement("userRelation/getUnFollowFriend", emptyList()) as? JsonArray
+            ?: throw ProfileException.InvalidResponse
+        val entries = rows.mapIndexedNotNull { index, value ->
+            val row = value as? JsonObject ?: return@mapIndexedNotNull null
+            val scalar = row["uuid"] as? JsonPrimitive ?: return@mapIndexedNotNull null
+            if (!scalar.isString && scalar.booleanOrNull != null) return@mapIndexedNotNull null
+            val id = meaningfulProfileText(scalar.contentOrNull)?.takeUnless { it.any(Char::isISOControl) }
+                ?: return@mapIndexedNotNull null
+            val person = ProfileListItem.Person(id, meaningfulProfileText(row.text("character_name")).orEmpty(),
+                meaningfulProfileText(row.text("area_name")).orEmpty(), meaningfulProfileText(row.text("group_name")).orEmpty(),
+                profileImage(row.text("avatar")), meaningfulProfileText(row.text("profile")).orEmpty())
+            ProfileRecommendationEntry(person, meaningfulProfileText(row.text("recommend_type")), index)
+        }
+        return ProfileRecommendationSnapshot(entries, rows.size, rows.size - entries.size)
+    }
 
     override suspend fun searchUsers(keywords: String, page: Int, limit: Int): ProfileUserSearchPage {
         require(keywords.isNotBlank() && page >= 1 && limit >= 1)
@@ -189,7 +206,7 @@ class ProfileApiService(
         val envelope = try { json.parseToJsonElement(response.body.decodeToString()) as? JsonObject
         } catch (_: IllegalArgumentException) { null } ?: throw ProfileException.InvalidResponse
         val code = envelope.number("code")
-        if (RisingStonesResponsePolicy.accepts(code)) {
+        if (if (endpoint == "userRelation/getUnFollowFriend") code == 10000 else RisingStonesResponsePolicy.accepts(code)) {
             return envelope["data"]?.takeUnless { it is JsonNull } ?: throw ProfileException.InvalidResponse
         }
         when (code) {
