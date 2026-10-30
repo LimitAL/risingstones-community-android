@@ -14,6 +14,8 @@
 
 动态／评论草稿的已选提及移除方法见[本地编辑合同](docs/mention-reminder-controls-20261030.md)，不涉及远端删除或自动发送。
 
+- [动态编辑器提醒对象身份去重](docs/mention-notification-identity-20261030.md)
+
 ## 功能模块
 
 - `core`：与认证来源无关的会话、能力和请求授权契约。

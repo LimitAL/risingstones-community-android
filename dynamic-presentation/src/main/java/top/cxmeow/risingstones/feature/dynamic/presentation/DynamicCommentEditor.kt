@@ -68,7 +68,8 @@ internal fun DynamicCommentEditorState.preparePublishingContent(): PreparedDynam
 private fun DynamicCommentEditorState.prepareContent(publishing: Boolean): PreparedDynamicComment {
     var priorEnd = 0
     val valid = mentions.sortedBy { it.start }.filter { range -> (range.start >= priorEnd && range.matches(text)).also { if (it) priorEnd = range.end } }
-    val included = linkedSetOf<DynamicCommentMention>()
+    // Notification identity is the UUID; visible spans keep their own selected names.
+    val included = linkedMapOf<String, DynamicCommentMention>()
     val html = buildString {
         Regex("[^\\r\\n]+").findAll(text).forEach { line ->
             val first = line.value.indexOfFirst { !it.isWhitespace() }; if (first < 0) return@forEach
@@ -80,12 +81,12 @@ private fun DynamicCommentEditorState.prepareContent(publishing: Boolean): Prepa
                 append(text.substring(cursor, range.start).emojiHtml(publishing))
                 append("<span class=\"at-text\" data-uuid=\"").append("${range.mention.uuid}#${range.mention.characterName}".escaped())
                 append("\" contenteditable=\"false\">").append(text.substring(range.start, range.end).escaped()).append("</span>")
-                included += range.mention; cursor = range.end
+                included.putIfAbsent(range.mention.uuid, range.mention); cursor = range.end
             }
             append(text.substring(cursor, to).emojiHtml(publishing)).append("</p>")
         }
     }
-    return PreparedDynamicComment(html, included.toList())
+    return PreparedDynamicComment(html, included.values.toList())
 }
 
 private fun String.safeOffset(value: Int): Int { val offset = value.coerceIn(0, length); return if (offset in 1 until length && this[offset - 1].isHighSurrogate() && this[offset].isLowSurrogate()) offset - 1 else offset }
