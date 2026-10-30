@@ -24,6 +24,8 @@
 
 选人插入的保稿、分隔与来源规则见[本地编辑说明](docs/mention-insertion-placement-20261030.md)。
 
+职业目录原始分组与兼容边界见[本地合同说明](docs/duty-job-groups-local-20261030.md)。
+
 ## 功能模块
 
 - `core`：与认证来源无关的会话、能力和请求授权契约。

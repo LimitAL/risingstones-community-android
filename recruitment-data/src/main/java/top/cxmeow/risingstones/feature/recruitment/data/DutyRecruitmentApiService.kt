@@ -195,8 +195,18 @@ class DutyRecruitmentApiService(
     override suspend fun fetchCatalogs(): DutyRecruitmentCatalogs {
         val jobData = perform(RisingStonesApiRequest("api/home/recruit/getJobConfigList")).obj("data")
             ?: throw DutyRecruitmentException.MissingPayload
-        val jobs = jobData.values.flatMap { it as? JsonArray ?: throw DutyRecruitmentException.MissingPayload }
-            .mapNotNull { (it as? JsonObject)?.job() }.associateBy(DutyRecruitmentJob::id)
+        val sourceGroups = jobData.map { (name, value) ->
+            val rows = value as? JsonArray ?: throw DutyRecruitmentException.MissingPayload
+            top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentJobGroup(name,
+                rows.mapNotNull { (it as? JsonObject)?.job() })
+        }
+        // Keep the existing flat-map response order and last duplicate-ID winner for old consumers.
+        val jobs = sourceGroups.flatMap { it.jobs }.associateBy(DutyRecruitmentJob::id)
+        val officialOrder = listOf("职能分类", "防护职业", "治疗职业", "近战职业", "远程物理职业", "远程魔法职业", "限制职业")
+        val groups = sourceGroups.filter { it.jobs.isNotEmpty() }.sortedWith(
+            compareBy<top.cxmeow.risingstones.feature.recruitment.domain.DutyRecruitmentJobGroup> {
+                officialOrder.indexOf(it.name).takeIf { index -> index >= 0 } ?: Int.MAX_VALUE
+            }.thenBy { it.name })
         val duties = perform(RisingStonesApiRequest("api/home/recruit/getFbConfigList")).requiredArray("data")
             .mapNotNull { value ->
                 val item = value as? JsonObject ?: return@mapNotNull null
@@ -208,7 +218,7 @@ class DutyRecruitmentApiService(
                     weight = item.int("weight") ?: 0,
                 )
             }
-        return DutyRecruitmentCatalogs(jobs, duties)
+        return DutyRecruitmentCatalogs(jobs, duties, groups)
     }
 
     override suspend fun fetchDutyFilterCatalog(): DutyRecruitmentFilterCatalog {

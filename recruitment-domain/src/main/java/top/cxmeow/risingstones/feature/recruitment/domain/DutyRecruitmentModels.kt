@@ -113,10 +113,34 @@ data class DutyRecruitmentDutyConfig(
     val weight: Int,
 )
 
-data class DutyRecruitmentCatalogs(
+/** 响应对象原始组名及其有效职业行，行顺序与来源一致；不由roleType推断。 */
+data class DutyRecruitmentJobGroup(val name: String, val jobs: List<DutyRecruitmentJob>)
+
+data class DutyRecruitmentCatalogs @JvmOverloads constructor(
     val jobs: Map<String, DutyRecruitmentJob> = emptyMap(),
     val duties: List<DutyRecruitmentDutyConfig> = emptyList(),
+    /** null为旧快照未提供分组；空列表为来源已解析但没有有效非空组。 */
+    val jobGroups: List<DutyRecruitmentJobGroup>? = null,
 ) {
+    /** 保留旧Kotlin默认构造描述符和原两个默认参数的mask。 */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(jobs: Map<String, DutyRecruitmentJob>?, duties: List<DutyRecruitmentDutyConfig>?,
+        mask: Int, marker: kotlin.jvm.internal.DefaultConstructorMarker?) :
+        this(if (mask and 1 != 0) emptyMap() else requireNotNull(jobs),
+            if (mask and 2 != 0) emptyList() else requireNotNull(duties), null)
+
+    /** 旧JVM两字段copy保留新增的来源事实。 */
+    fun copy(jobs: Map<String, DutyRecruitmentJob>, duties: List<DutyRecruitmentDutyConfig>): DutyRecruitmentCatalogs =
+        DutyRecruitmentCatalogs(jobs, duties, jobGroups)
+
+    companion object {
+        @JvmStatic
+        @Suppress("UNUSED_PARAMETER")
+        fun `copy$default`(source: DutyRecruitmentCatalogs, jobs: Map<String, DutyRecruitmentJob>?,
+            duties: List<DutyRecruitmentDutyConfig>?, mask: Int, marker: Any?): DutyRecruitmentCatalogs =
+            source.copy(if (mask and 1 != 0) source.jobs else requireNotNull(jobs),
+                if (mask and 2 != 0) source.duties else requireNotNull(duties))
+    }
     val dutyTypes: List<String>
         get() = duties.map { it.dutyType }.distinct()
     fun dutyNames(type: String) = duties.filter { type.isBlank() || it.dutyType == type }
