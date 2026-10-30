@@ -308,11 +308,11 @@ class GlamourApiService(
     }
 
     override suspend fun followAuthor(authorId: String) {
-        form("api/home/userRelation/follow", listOf("follow_uuid" to authorId))
+        form("api/home/userRelation/follow", listOf("follow_uuid" to authorId), singleAttemptRelation = true)
     }
 
     override suspend fun cancelFollowAuthor(authorId: String) {
-        perform { headers ->
+        perform(singleAttemptRelation = true) { headers ->
             RisingStonesApiRequest(
                 "api/home/userRelation/cancelFollow",
                 method = RisingStonesHttpMethod.Put,
@@ -507,8 +507,8 @@ class GlamourApiService(
     override suspend fun toggleLike(id: Int): Boolean =
         form("api/home/glamour/like", listOf("id" to "$id")).intValue("data") == 1
 
-    private suspend fun form(path: String, fields: List<Pair<String, String>>): JsonObject =
-        perform { headers ->
+    private suspend fun form(path: String, fields: List<Pair<String, String>>, singleAttemptRelation: Boolean = false): JsonObject =
+        perform(singleAttemptRelation = singleAttemptRelation) { headers ->
             val all = fields + ("tempsuid" to temporarySessionId)
             RisingStonesApiRequest(
                 path,
@@ -523,6 +523,7 @@ class GlamourApiService(
         }
 
     private suspend fun perform(
+        singleAttemptRelation: Boolean = false,
         request: (Map<String, String>) -> RisingStonesApiRequest,
     ): JsonObject {
         suspend fun execute(authorizer: RisingStonesRequestAuthorizer): Pair<JsonObject, RisingStonesHttpMethod> {
@@ -554,7 +555,7 @@ class GlamourApiService(
                 val response = execution?.first
                 if (response != null && response.intValue("code") != 10105 && !response.isAuthenticationFailure()) {
                     val code = response.intValue("code") ?: throw GlamourException.MissingPayload
-                    if (!RisingStonesResponsePolicy.accepts(code)) {
+                    if (!(if (singleAttemptRelation) code == 10000 else RisingStonesResponsePolicy.accepts(code))) {
                         val mutation = requireNotNull(execution).second in setOf(
                             RisingStonesHttpMethod.Post, RisingStonesHttpMethod.Put, RisingStonesHttpMethod.Delete,
                         )
@@ -562,7 +563,8 @@ class GlamourApiService(
                     }
                     return response
                 }
-                if (attempt == 1) throw GlamourException.AuthenticationRequired
+                // A relation mutation may already have reached the server. Never refresh and replay it.
+                if (singleAttemptRelation || attempt == 1) throw GlamourException.AuthenticationRequired
                 conflict = conflict || response?.intValue("code") == 10105
                 authorizer = (if (conflict && sessionProvider is RisingStonesIdentityConflictResolver) {
                     sessionProvider.awaitIdentityConflictResolution()
