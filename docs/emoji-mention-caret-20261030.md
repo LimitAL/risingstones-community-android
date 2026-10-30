@@ -1,5 +1,7 @@
 # 表情插入的提及光标保护与只读预览
 
+> 当前非折叠选区规则已由[选区文字保留批次](emoji-selection-preservation-20261030.md)更新：取选区末端插入并保留正文。下文“保留旧选区替换”及74项结果是该历史批次范围，不代表现行规则，也不追溯改写历史通过记录。
+
 本地批次 `emoji-mention-caret-20261030`，基线 `2bee8df`。参考客户端缓存70d0065 `RisingStonesMentionDraft.insertText`／`insertionPoint` 与 `RisingStonesMentionTests.textGoesAtTheCursorWithoutSplittingAMention` 明确：折叠光标位于有效已选提及内部时，表情放在整段提及及一个后随ASCII空格之后，不拆开名字或丢弃身份。
 
 新增公开值扩展 `DynamicCommentEditorState.previewEmojiInsertion(number)`，返回不修改原对象的预览状态；编号不在1…46时返回null。预览与发布／评论两个公开VM的实际表情插入共用同一实现，公开VM原权限与提交保护不变。

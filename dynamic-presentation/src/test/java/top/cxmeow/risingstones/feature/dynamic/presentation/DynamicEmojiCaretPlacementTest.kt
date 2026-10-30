@@ -38,8 +38,8 @@ class DynamicEmojiCaretPlacementTest {
         val plain=DynamicCommentEditorState("@晨星 ",1,1);val stale=plain.copy(mentions=listOf(DynamicCommentMentionRange(-1,99,a),DynamicCommentMentionRange(0,3,b)))
         for(s in listOf(plain,stale)){val r=requireNotNull(s.previewEmojiInsertion(1));assertEquals("@[emo1]晨星 ",r.text);assertTrue(r.prepareComment().mentions.isEmpty())}
     }
-    @Test fun noncollapsedSelectionKeepsExistingReplacementBehavior(){
-        val r=requireNotNull(selected().copy(selectionStart=1,selectionEnd=2).previewEmojiInsertion(1));assertEquals("@[emo1]星 ",r.text);assertTrue(r.mentions.isEmpty())
+    @Test fun noncollapsedSelectionUsesItsEndAndPreservesTheSelectedName(){
+        val r=requireNotNull(selected().copy(selectionStart=1,selectionEnd=2).previewEmojiInsertion(1));assertEquals("@晨星 [emo1]",r.text);assertEquals(listOf(a),r.prepareComment().mentions)
     }
     @Test fun previewIsImmutableAndInvalidNumbersReturnNull(){
         val s=selected().copy(selectionStart=1,selectionEnd=1,emojiPickerOpen=true);val original=s.copy();val r=requireNotNull(s.previewEmojiInsertion(1));assertEquals(original,s);assertTrue(r.emojiPickerOpen)

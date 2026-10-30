@@ -20,6 +20,8 @@
 
 - [表情插入光标保护与只读预览](docs/emoji-mention-caret-20261030.md)
 
+- [表情工具保留选区文字](docs/emoji-selection-preservation-20261030.md)
+
 ## 功能模块
 
 - `core`：与认证来源无关的会话、能力和请求授权契约。

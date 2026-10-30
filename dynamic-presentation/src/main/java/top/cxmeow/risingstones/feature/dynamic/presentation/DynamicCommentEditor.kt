@@ -79,19 +79,17 @@ internal fun DynamicCommentEditorState.insert(value: String, mention: DynamicCom
 
 /**
  * 只读预览表情插入后的编辑状态；编号不在1…46时返回null，不修改原值、不发请求。
- * 折叠光标在有效已选提及内部时，移到整段末尾及一个后随ASCII空格之后；非折叠选区仍按原规则替换。
+ * 以选区末端（折叠时为光标）插入并保留原选区文字；末端在有效提及内部时移到整段及一个后随ASCII空格后。
  * 调用方仍负责当前身份、配额和生命周期；本方法不提供认证或提交能力。
  */
 fun DynamicCommentEditorState.previewEmojiInsertion(number: Int): DynamicCommentEditorState? {
     if (number !in 1..46) return null
-    val from = text.safeOffset(minOf(selectionStart, selectionEnd))
-    val to = text.safeOffset(maxOf(selectionStart, selectionEnd))
-    if (from != to) return insert("[emo$number]")
+    val cursor = text.safeOffset(maxOf(selectionStart, selectionEnd))
     var priorEnd = 0
     val selected = mentions.sortedBy { it.start }.filter { range ->
         (range.start >= priorEnd && range.matches(text)).also { if (it) priorEnd = range.end }
-    }.firstOrNull { it.start < from && from < it.end }
-    val point = selected?.end?.let { if (text.getOrNull(it) == ' ') it + 1 else it } ?: from
+    }.firstOrNull { it.start < cursor && cursor < it.end }
+    val point = selected?.end?.let { if (text.getOrNull(it) == ' ') it + 1 else it } ?: cursor
     return copy(selectionStart = point, selectionEnd = point).insert("[emo$number]")
 }
 
