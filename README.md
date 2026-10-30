@@ -18,6 +18,8 @@
 
 - [已选提及的用户纯删除规则](docs/mention-atomic-deletion-20261030.md)
 
+- [表情插入光标保护与只读预览](docs/emoji-mention-caret-20261030.md)
+
 ## 功能模块
 
 - `core`：与认证来源无关的会话、能力和请求授权契约。

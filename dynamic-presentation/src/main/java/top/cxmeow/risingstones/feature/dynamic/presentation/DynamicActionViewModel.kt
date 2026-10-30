@@ -148,7 +148,12 @@ class DynamicActionViewModel(private val actions: DynamicActionService, private 
     }
 
     fun setEmojiPicker(open: Boolean) = mutableState.update { it.copy(editor = it.editor.copy(emojiPickerOpen = open)) }
-    fun insertEmoji(number: Int) { if (number in 1..46 && !state.value.isSubmitting) mutableState.update { it.copy(editor = it.editor.insert("[emo$number]").copy(emojiPickerOpen = false)) } }
+    fun insertEmoji(number: Int) {
+        if (number in 1..46 && !state.value.isSubmitting) mutableState.update {
+            val editor = it.editor.previewEmojiInsertion(number) ?: return@update it
+            it.copy(editor = editor.copy(emojiPickerOpen = false))
+        }
+    }
     fun setMentionPicker(open: Boolean) {
         mutableState.update { it.copy(editor = it.editor.copy(mentionPickerOpen = open)) }
         if (open && state.value.mentionCandidates.isEmpty()) loadMentions(true)

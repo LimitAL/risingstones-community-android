@@ -106,7 +106,8 @@ class DynamicPublishingViewModel(
 
     fun insertEmoji(number: Int) {
         if (editable && number in 1..46) mutableState.update {
-            it.copy(editor = it.editor.insert("[emo$number]").copy(emojiPickerOpen = false), error = null)
+            val editor = it.editor.previewEmojiInsertion(number) ?: return@update it
+            it.copy(editor = editor.copy(emojiPickerOpen = false), error = null)
         }
     }
 
