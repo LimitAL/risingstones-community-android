@@ -1,6 +1,7 @@
 package top.cxmeow.risingstones.feature.guild.data
 
 import java.net.URI
+import top.cxmeow.risingstones.feature.guild.domain.GuildMemberSourceRows
 import top.cxmeow.risingstones.feature.guild.domain.GuildReadSnapshot
 import top.cxmeow.risingstones.feature.guild.domain.GuildReadPhoto
 import kotlinx.coroutines.CancellationException
@@ -140,9 +141,12 @@ class GuildApiService(
 
     override suspend fun members(guildId: GuildId): GuildMembers {
         val data = get(guildPath("getGuildMember"), listOf(q("guild_id", guildId.value))).requiredObject()
+        val registered = data.optionalMemberArray("registered")
+        val unregistered = data.optionalMemberArray("unRegister")
         return GuildMembers(
-            registered = data.requiredArray("registered").map { member(it.requiredObject(), true) },
-            unregistered = data.requiredArray("unRegister").map { member(it.requiredObject(), false) },
+            registered = registered.orEmpty().map { member(it.requiredObject(), true) },
+            unregistered = unregistered.orEmpty().map { member(it.requiredObject(), false) },
+            sourceRows = GuildMemberSourceRows(registered?.size, unregistered?.size),
         )
     }
 
@@ -553,4 +557,11 @@ private fun guildReadEmblem(value: String?): String? {
     val id=value?.toBigDecimalOrNull()?.stripTrailingZeros()?.toPlainString()
     val filename=when(id){"1"->"theMaelstrom.png";"2"->"theOrderOfTheTwinAdder.png";"3"->"theImmortalFlames.png";else->return null}
     return "https://static.web.sdo.com/jijiamobile/pic/ff14/ffstones/statistics/pvp/$filename"
+}
+
+/** 仅成员两个可选分组允许缺省；已提供的坏结构继续失败。 */
+private fun JsonObject.optionalMemberArray(name: String): JsonArray? = when (val value = this[name]) {
+    null, JsonNull -> null
+    is JsonArray -> value
+    else -> throw GuildException.InvalidResponse
 }

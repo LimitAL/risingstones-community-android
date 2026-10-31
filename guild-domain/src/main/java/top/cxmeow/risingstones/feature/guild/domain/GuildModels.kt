@@ -57,10 +57,33 @@ data class GuildMember(
     val adminTag: Int?,
 )
 
-data class GuildMembers(
+/** 来源数组原始行数；null为缺省或null，0仅表示明确空数组，并非部队总人数。 */
+data class GuildMemberSourceRows(val registered: Int?, val unregistered: Int?) {
+    init {
+        require(registered == null || registered >= 0)
+        require(unregistered == null || unregistered >= 0)
+    }
+}
+
+data class GuildMembers @JvmOverloads constructor(
     val registered: List<GuildMember>,
     val unregistered: List<GuildMember>,
-)
+    /** null为旧消费者或手工快照未报告来源；不能从过滤后列表补算。 */
+    val sourceRows: GuildMemberSourceRows? = null,
+) {
+    /** 保留旧两字段copy的JVM描述符，同时保留新增来源事实。 */
+    fun copy(registered: List<GuildMember>, unregistered: List<GuildMember>): GuildMembers =
+        GuildMembers(registered, unregistered, sourceRows)
+
+    companion object {
+        @JvmStatic
+        @Suppress("UNUSED_PARAMETER")
+        fun `copy$default`(source: GuildMembers, registered: List<GuildMember>?,
+            unregistered: List<GuildMember>?, mask: Int, marker: Any?): GuildMembers =
+            source.copy(if (mask and 1 != 0) source.registered else requireNotNull(registered),
+                if (mask and 2 != 0) source.unregistered else requireNotNull(unregistered))
+    }
+}
 
 /** Local summary for guild activity navigation; it deliberately does not reuse dynamic-domain. */
 data class GuildActivitySummary(

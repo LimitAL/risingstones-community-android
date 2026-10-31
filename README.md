@@ -176,3 +176,5 @@ AAB 和 SHA-256 清单附加到对应 GitHub Release。发布成功后可通过 
 推荐用户的可选只读投影、来源分组及身份约束见[本地合同](docs/profile-recommendations-read-local-20261030.md)。
 
 既有关注／取消关注的严格成功码及认证不重放范围见[单次发送合同](docs/follow-single-attempt-local-20261030.md)。
+
+部队成员缺省分组与来源行数语义见[可选分组读取合同](docs/guild-member-optional-groups.md)。
