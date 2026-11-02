@@ -12,4 +12,4 @@
 
 完整 JVM 结果 1602 项、零失败／错误／跳过；完整 testDebugUnitTest、lintDebug、assembleDebug、verifyReleaseManifestSecurity 与本地 Maven 生成通过。撤回 UI→data 包装依赖后，再跑受影响两个模块单测、UI lint 和本地 Maven 生成通过。40 个 beta8 本地 Maven 制品校验通过；dynamic-data 新入口消费者 33 秒、dynamic-ui-compose 既有消费者 4 秒编译通过，均为离线实际 AAR 消费，不是源工程替换。仓库布局、分层、公开依赖、中文文档、凭据和敏感数据静态检查通过，未改门禁或基线。
 
-本次尚未完成全部 22 个孤立消费面及聚合消费者、App 最终非源依赖门禁、新数据入口原生 HEIF／方向复验、GitHub Packages 真实发布与下载验证。Android 发布候选的宿主个人数据清单仍有审批阻塞；不把上述本地结果当作已满足远端发布资格。
+随后全部 22 个孤立消费面及聚合消费者均已通过离线 beta8 Maven 编译，未改消费者边界或回归规则。App 最终非源依赖门禁、新数据入口原生 HEIF／方向复验、GitHub Packages 真实发布与下载验证仍未完成。Android 发布候选的宿主个人数据清单仍有审批阻塞；不把上述本地结果当作已满足远端发布资格。
