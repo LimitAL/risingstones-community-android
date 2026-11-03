@@ -71,7 +71,161 @@ data class GlamourUiState(
     val folderMutationError: String? = null,
     val listError: String? = null,
     val error: String? = null,
-)
+    /** Typed relation failure for localized consumers; legacy followError remains available. */
+    val followFailure: Throwable?,
+) {
+
+    /** Retains beta.7 JVM constructor and its two default-argument masks. */
+    constructor(
+        source: GlamourListSource = GlamourListSource.Community,
+        items: List<GlamourListingSummary> = emptyList(),
+        page: Int = 1,
+        hasNextPage: Boolean = false,
+        isLoading: Boolean = false,
+        isRefreshing: Boolean = false,
+        isLoadingMore: Boolean = false,
+        filter: GlamourFilter = GlamourFilter(),
+        search: GlamourSearchSelection? = null,
+        races: List<GlamourRace> = emptyList(),
+        isLoadingRaces: Boolean = false,
+        raceError: String? = null,
+        folders: List<GlamourFavoriteFolder> = emptyList(),
+        foldersResolved: Boolean = false,
+        isLoadingFolders: Boolean = false,
+        selectedFolderId: Int? = null,
+        profileStatistics: GlamourProfileStatistics? = null,
+        isLoadingProfileStatistics: Boolean = false,
+        profileStatisticsResolved: Boolean = false,
+        authorProfile: GlamourAuthorProfile? = null,
+        isLoadingAuthorProfile: Boolean = false,
+        authorProfileResolved: Boolean = false,
+        isUpdatingFollow: Boolean = false,
+        followError: String? = null,
+        selectedId: Int? = null,
+        selectedDetail: GlamourDetail? = null,
+        isLoadingDetail: Boolean = false,
+        detailError: String? = null,
+        mutatingIds: Set<Int> = emptySet(),
+        isCreatingFolder: Boolean = false,
+        deletingFolderId: Int? = null,
+        folderMutationError: String? = null,
+        listError: String? = null,
+        error: String? = null,
+    ) : this(
+        source = source,
+        items = items,
+        page = page,
+        hasNextPage = hasNextPage,
+        isLoading = isLoading,
+        isRefreshing = isRefreshing,
+        isLoadingMore = isLoadingMore,
+        filter = filter,
+        search = search,
+        races = races,
+        isLoadingRaces = isLoadingRaces,
+        raceError = raceError,
+        folders = folders,
+        foldersResolved = foldersResolved,
+        isLoadingFolders = isLoadingFolders,
+        selectedFolderId = selectedFolderId,
+        profileStatistics = profileStatistics,
+        isLoadingProfileStatistics = isLoadingProfileStatistics,
+        profileStatisticsResolved = profileStatisticsResolved,
+        authorProfile = authorProfile,
+        isLoadingAuthorProfile = isLoadingAuthorProfile,
+        authorProfileResolved = authorProfileResolved,
+        isUpdatingFollow = isUpdatingFollow,
+        followError = followError,
+        selectedId = selectedId,
+        selectedDetail = selectedDetail,
+        isLoadingDetail = isLoadingDetail,
+        detailError = detailError,
+        mutatingIds = mutatingIds,
+        isCreatingFolder = isCreatingFolder,
+        deletingFolderId = deletingFolderId,
+        folderMutationError = folderMutationError,
+        listError = listError,
+        error = error,
+        followFailure = null,
+    )
+
+    /** Explicit JVM no-argument entry retained for Java and precompiled consumers. */
+    constructor() : this(source = GlamourListSource.Community, followFailure = null)
+
+    /** Beta.7 copy overload: unrelated legacy copies retain the typed failure. */
+    fun copy(
+        source: GlamourListSource = this.source,
+        items: List<GlamourListingSummary> = this.items,
+        page: Int = this.page,
+        hasNextPage: Boolean = this.hasNextPage,
+        isLoading: Boolean = this.isLoading,
+        isRefreshing: Boolean = this.isRefreshing,
+        isLoadingMore: Boolean = this.isLoadingMore,
+        filter: GlamourFilter = this.filter,
+        search: GlamourSearchSelection? = this.search,
+        races: List<GlamourRace> = this.races,
+        isLoadingRaces: Boolean = this.isLoadingRaces,
+        raceError: String? = this.raceError,
+        folders: List<GlamourFavoriteFolder> = this.folders,
+        foldersResolved: Boolean = this.foldersResolved,
+        isLoadingFolders: Boolean = this.isLoadingFolders,
+        selectedFolderId: Int? = this.selectedFolderId,
+        profileStatistics: GlamourProfileStatistics? = this.profileStatistics,
+        isLoadingProfileStatistics: Boolean = this.isLoadingProfileStatistics,
+        profileStatisticsResolved: Boolean = this.profileStatisticsResolved,
+        authorProfile: GlamourAuthorProfile? = this.authorProfile,
+        isLoadingAuthorProfile: Boolean = this.isLoadingAuthorProfile,
+        authorProfileResolved: Boolean = this.authorProfileResolved,
+        isUpdatingFollow: Boolean = this.isUpdatingFollow,
+        followError: String? = this.followError,
+        selectedId: Int? = this.selectedId,
+        selectedDetail: GlamourDetail? = this.selectedDetail,
+        isLoadingDetail: Boolean = this.isLoadingDetail,
+        detailError: String? = this.detailError,
+        mutatingIds: Set<Int> = this.mutatingIds,
+        isCreatingFolder: Boolean = this.isCreatingFolder,
+        deletingFolderId: Int? = this.deletingFolderId,
+        folderMutationError: String? = this.folderMutationError,
+        listError: String? = this.listError,
+        error: String? = this.error,
+    ): GlamourUiState = GlamourUiState(
+        source = source,
+        items = items,
+        page = page,
+        hasNextPage = hasNextPage,
+        isLoading = isLoading,
+        isRefreshing = isRefreshing,
+        isLoadingMore = isLoadingMore,
+        filter = filter,
+        search = search,
+        races = races,
+        isLoadingRaces = isLoadingRaces,
+        raceError = raceError,
+        folders = folders,
+        foldersResolved = foldersResolved,
+        isLoadingFolders = isLoadingFolders,
+        selectedFolderId = selectedFolderId,
+        profileStatistics = profileStatistics,
+        isLoadingProfileStatistics = isLoadingProfileStatistics,
+        profileStatisticsResolved = profileStatisticsResolved,
+        authorProfile = authorProfile,
+        isLoadingAuthorProfile = isLoadingAuthorProfile,
+        authorProfileResolved = authorProfileResolved,
+        isUpdatingFollow = isUpdatingFollow,
+        followError = followError,
+        selectedId = selectedId,
+        selectedDetail = selectedDetail,
+        isLoadingDetail = isLoadingDetail,
+        detailError = detailError,
+        mutatingIds = mutatingIds,
+        isCreatingFolder = isCreatingFolder,
+        deletingFolderId = deletingFolderId,
+        folderMutationError = folderMutationError,
+        listError = listError,
+        error = error,
+        followFailure = this.followFailure,
+    )
+}
 
 data class GlamourBrowsingUiState(
     val following: Boolean = false,
@@ -345,7 +499,7 @@ class GlamourViewModel(
         val current = mutableState.value.authorProfile?.isFollowing == true
         if (mutableState.value.isUpdatingFollow) return
         viewModelScope.launch {
-            mutableState.update { it.copy(isUpdatingFollow = true, followError = null) }
+            mutableState.update { it.copy(isUpdatingFollow = true, followError = null, followFailure = null) }
             try {
                 if (current) service.cancelFollowAuthor(authorId) else service.followAuthor(authorId)
                 currentCoroutineContext().ensureActive()
@@ -356,14 +510,14 @@ class GlamourViewModel(
                 currentCoroutineContext().ensureActive()
                 if (handleAuthenticationFailure(error)) return@launch
                 mutableState.update {
-                    it.copy(isUpdatingFollow = false, followError = error.message)
+                    it.copy(isUpdatingFollow = false, followError = error.message, followFailure = error)
                 }
             }
         }
     }
 
     fun clearFollowError() {
-        mutableState.update { it.copy(followError = null) }
+        mutableState.update { it.copy(followError = null, followFailure = null) }
     }
 
     fun loadMore() {
@@ -1043,7 +1197,7 @@ class GlamourViewModel(
     private fun loadAuthorProfile() {
         val authorId = profileAuthor?.id?.takeIf(String::isNotBlank) ?: return
         if (mutableState.value.isLoadingAuthorProfile) return
-        mutableState.update { it.copy(isLoadingAuthorProfile = true, followError = null) }
+        mutableState.update { it.copy(isLoadingAuthorProfile = true, followError = null, followFailure = null) }
         viewModelScope.launch {
             try {
                 val profile = service.fetchAuthorProfile(authorId)
@@ -1066,7 +1220,7 @@ class GlamourViewModel(
                         isLoadingAuthorProfile = false,
                         authorProfileResolved = true,
                         isUpdatingFollow = false,
-                        followError = error.message,
+                        followError = error.message, followFailure = error,
                     )
                 }
             }
